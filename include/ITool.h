@@ -6,6 +6,7 @@
 #include "ToolInvocation.h"
 
 #include <concepts>
+#include <filesystem>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -51,6 +52,18 @@ public:
     // Called by BuildDriver after a successful run(). Tools that maintain
     // state across passes (e.g. "ran once already") update it here.
     virtual void onSuccess(const ToolContext& /*ctx*/) { }
+
+    // Files whose content determines whether this tool's output is current
+    // (trigger files, .bib databases, …). BuildDriver persists their hashes
+    // after a successful build and re-checks them on the next invocation's
+    // incremental-skip path. Only existing files should be returned.
+    // Default: no tracked inputs — the tool is re-run whenever decide() says
+    // Run on a fresh invocation.
+    virtual std::vector<std::filesystem::path> trackedInputs(
+        const ToolContext& /*ctx*/) const
+    {
+        return {};
+    }
 };
 
 } // namespace maketex
