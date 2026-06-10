@@ -93,8 +93,6 @@ int main(int argc, char* argv[])
     maketex::EngineInvocation inv {
         .texFile = texFile,
         .outputDir = outDir,
-        .auxDir = outDir,
-        .recorder = true,
         .haltOnError = true,
     };
 

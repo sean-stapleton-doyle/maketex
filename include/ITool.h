@@ -5,22 +5,12 @@
 #include "ToolContext.h"
 #include "ToolInvocation.h"
 
-#include <concepts>
 #include <filesystem>
 #include <string>
 #include <string_view>
 #include <vector>
 
 namespace maketex {
-
-template <typename T>
-concept Tool = requires(T t, const ToolInvocation& inv, const ToolContext& ctx) {
-    { t.name() } -> std::convertible_to<std::string_view>;
-    { t.invokerKind() } -> std::same_as<InvokerKind>;
-    { t.buildArgs(inv) } -> std::same_as<std::vector<std::string>>;
-    { t.decide(ctx) } -> std::same_as<RunDecision>;
-    { t.onSuccess(ctx) } -> std::same_as<void>;
-};
 
 // Note: decide() is non-const because tools may stash scheduling state
 // computed during the check (e.g. a freshly-hashed trigger file) for

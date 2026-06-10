@@ -6,7 +6,6 @@
 #include <fstream>
 
 using maketex::LogParser;
-using maketex::LogRecord;
 namespace fs = std::filesystem;
 
 namespace {
@@ -45,8 +44,6 @@ TEST_F(LogParserTest, cleanLog_allFlagsFalse)
     const auto& rec = parsed.value();
 
     EXPECT_FALSE(rec.rerunNeeded);
-    EXPECT_FALSE(rec.undefinedReferences);
-    EXPECT_FALSE(rec.undefinedCitations);
 }
 
 TEST_F(LogParserTest, labelsMayHaveChanged_setsRerunNeeded)
@@ -91,40 +88,17 @@ TEST_F(LogParserTest, pleaseRerunLatex_setsRerunNeeded)
     EXPECT_TRUE(parsed.value().rerunNeeded);
 }
 
-TEST_F(LogParserTest, undefinedReferences_setsFlag)
+TEST_F(LogParserTest, warningLinesWithoutRerunSignalAreIgnored)
 {
+    // Undefined references/citations are surfaced as user diagnostics by
+    // DiagnosticExtractor from stdout — they are not rerun triggers.
     auto log = writeLog("main.log",
-        "LaTeX Warning: There were undefined references.\n");
-
-    auto parsed = LogParser {}.parse(log);
-    ASSERT_TRUE(parsed.has_value());
-    EXPECT_TRUE(parsed.value().undefinedReferences);
-}
-
-TEST_F(LogParserTest, undefinedCitation_setsFlag)
-{
-    auto log = writeLog("main.log",
-        "LaTeX Warning: Citation `smith2024' on page 1 undefined on input line 42.\n");
-
-    auto parsed = LogParser {}.parse(log);
-    ASSERT_TRUE(parsed.has_value());
-    EXPECT_TRUE(parsed.value().undefinedCitations);
-}
-
-TEST_F(LogParserTest, multipleSignals_allSet)
-{
-    auto log = writeLog("main.log",
-        "LaTeX Warning: Label(s) may have changed. Rerun to get cross-references right.\n"
         "LaTeX Warning: There were undefined references.\n"
         "LaTeX Warning: Citation `jones2023' on page 2 undefined on input line 10.\n");
 
     auto parsed = LogParser {}.parse(log);
     ASSERT_TRUE(parsed.has_value());
-    const auto& rec = parsed.value();
-
-    EXPECT_TRUE(rec.rerunNeeded);
-    EXPECT_TRUE(rec.undefinedReferences);
-    EXPECT_TRUE(rec.undefinedCitations);
+    EXPECT_FALSE(parsed.value().rerunNeeded);
 }
 
 TEST_F(LogParserTest, missingFileReturnsError)

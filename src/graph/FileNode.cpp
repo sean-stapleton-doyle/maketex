@@ -19,13 +19,4 @@ const FileState& FileNode::refresh(FileStateTracker& tracker)
     return m_state;
 }
 
-bool FileNode::changed(const FileState& before, const FileState& after)
-{
-    if (before.exists != after.exists)
-        return true;
-    if (!before.exists && !after.exists)
-        return false;
-    return before.hash != after.hash;
-}
-
 } // namespace maketex

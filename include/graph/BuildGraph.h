@@ -17,7 +17,8 @@ namespace maketex {
 // references are stable for the graph's lifetime.
 //
 // Edges are stored on RuleNode (addInput / addOutput). The graph's role is
-// ownership, lookup, and scheduling-order derivation.
+// ownership and lookup; staleness policy lives on RuleNode, scheduling on
+// BuildDriver.
 class BuildGraph {
 public:
     // Returns the existing node if one with this path already exists (role ignored).
@@ -35,20 +36,11 @@ public:
     // All file nodes (unordered).
     std::vector<FileNode*> files() const;
 
-    // All rule nodes in insertion order.
-    std::vector<RuleNode*> rules() const;
-
-    // Rules ordered so that if rule A produces any input of rule B, A comes first.
-    // Throws std::runtime_error if a dependency cycle is detected.
-    // Note: the latex engine rule creates an expected cycle with bibliography
-    // rules; the driver breaks that cycle by handling the engine rule explicitly.
-    std::vector<RuleNode*> topologicalRuleOrder() const;
-
 private:
     // Keyed by weakly-canonical path string for deduplication.
     std::unordered_map<std::string, std::unique_ptr<FileNode>> m_files;
 
-    // Insertion-ordered for deterministic topological sort.
+    // Insertion-ordered for deterministic iteration.
     std::vector<std::unique_ptr<RuleNode>> m_rules;
     std::unordered_map<std::string, RuleNode*> m_ruleIndex;
 };

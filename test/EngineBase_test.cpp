@@ -37,7 +37,6 @@ TEST_F(EngineBaseTest, pdflatexAlwaysAddsRecorder)
     PdfLatexEngine engine;
     EngineInvocation inv;
     inv.texFile = "doc.tex";
-    inv.recorder = false; // buildArgs adds -recorder unconditionally
     auto args = engine.buildArgs(inv);
     EXPECT_NE(std::ranges::find(args, "-recorder"), args.end());
 }

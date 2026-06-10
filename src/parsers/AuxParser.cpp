@@ -2,8 +2,6 @@
 
 #include "parsers/TextFileParser.h"
 
-#include <unordered_set>
-
 namespace maketex {
 
 namespace fs = std::filesystem;
@@ -11,25 +9,12 @@ namespace fs = std::filesystem;
 std::expected<AuxRecord, std::error_code> AuxParser::parse(const fs::path& path) const
 {
     AuxRecord rec;
-    fs::path dir = path.parent_path();
-    std::unordered_set<std::string> seenCitations;
 
     auto r = detail::forEachLine(path, [&](std::string_view line) {
-        if (auto c = extractBraces(line, "\\citation{"); !c.empty()) {
-            splitComma(c, [&](std::string_view key) {
-                std::string k(key);
-                if (seenCitations.insert(k).second)
-                    rec.citations.push_back(std::move(k));
-            });
-        } else if (auto b = extractBraces(line, "\\bibdata{"); !b.empty()) {
+        if (auto b = extractBraces(line, "\\bibdata{"); !b.empty()) {
             splitComma(b, [&](std::string_view name) {
                 rec.bibDataFiles.emplace_back(name);
             });
-        } else if (auto i = extractBraces(line, "\\@input{"); !i.empty()) {
-            fs::path p(i);
-            if (p.is_relative())
-                p = dir / p;
-            rec.inputs.push_back(fs::weakly_canonical(p));
         }
     });
     if (!r)
