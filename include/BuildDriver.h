@@ -63,7 +63,25 @@ private:
         bool filesChanged = false;
         std::optional<RunResult<ToolInvocation>> failure;
         std::string failedToolName;
+        std::vector<ITool*> ranTools; // tools that executed successfully
     };
+
+    // Rule identity must include the job name: the state database lives
+    // per-directory, and two documents built in the same directory must not
+    // share rule records (they would clobber each other's input snapshots).
+    std::string engineRuleName() const;
+    std::string toolRuleName(const ITool& tool) const;
+
+    // Context handed to ITool::decide()/trackedInputs(), with lazy log/aux
+    // parsing bound to this invocation's output files.
+    ToolContext makeToolContext() const;
+
+    // Persists input hashes for every tool that ran this build, using
+    // post-convergence file contents, so the next invocation's incremental
+    // skip can verify tool inputs (e.g. .bib files) are unchanged.
+    void persistToolRules(FileStateTracker& tracker,
+        const ToolContext& ctx,
+        const std::vector<ITool*>& ranTools);
 
     // Parse .fls and wire up FileNode/RuleNode edges in m_graph.
     void updateGraphFromFls(const std::filesystem::path& flsPath,

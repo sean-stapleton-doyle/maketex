@@ -35,8 +35,12 @@ public:
     std::vector<std::string> buildArgs(const ToolInvocation& inv) const override;
     RunDecision decide(const ToolContext& ctx) override;
     void onSuccess(const ToolContext& ctx) override;
+    std::vector<std::filesystem::path> trackedInputs(
+        const ToolContext& ctx) const override;
 
 private:
+    std::filesystem::path triggerPath(const ToolContext& ctx) const;
+
     std::string m_name;
     std::string m_triggerExtension;
     std::vector<std::string> m_argvTemplate;

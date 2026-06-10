@@ -13,6 +13,7 @@
 #include "parsers/FlsParser.h"
 #include "parsers/LogParser.h"
 
+#include <algorithm>
 #include <cassert>
 #include <unordered_set>
 
@@ -41,33 +42,53 @@ BuildDriver::BuildDriver(IEngine& engine,
 
 // ── helpers ───────────────────────────────────────────────────────────────────
 
-static std::string jobName(const EngineInvocation& inv)
-{
-    return inv.jobName.value_or(inv.texFile.stem().string());
-}
-
 static std::filesystem::path flsPath(const EngineInvocation& inv)
 {
-    return inv.outputDir / (jobName(inv) + ".fls");
+    return inv.outputDir / (inv.resolvedJobName() + ".fls");
 }
 
 static std::filesystem::path logPath(const EngineInvocation& inv)
 {
-    return inv.outputDir / (jobName(inv) + ".log");
+    return inv.outputDir / (inv.resolvedJobName() + ".log");
 }
 
 static std::filesystem::path auxPath(const EngineInvocation& inv)
 {
-    return inv.outputDir / (jobName(inv) + ".aux");
+    return inv.outputDir / (inv.resolvedJobName() + ".aux");
 }
 
 static ToolInvocation makeToolInv(const EngineInvocation& inv)
 {
     return ToolInvocation {
         .workingDir = inv.outputDir,
-        .jobName = jobName(inv),
+        .jobName = inv.resolvedJobName(),
         .outputDir = inv.outputDir,
     };
+}
+
+std::string BuildDriver::engineRuleName() const
+{
+    return std::string(m_engine.name()) + ":" + m_inv.resolvedJobName();
+}
+
+std::string BuildDriver::toolRuleName(const ITool& tool) const
+{
+    return "tool:" + std::string(tool.name()) + ":" + m_inv.resolvedJobName();
+}
+
+ToolContext BuildDriver::makeToolContext() const
+{
+    auto logFile = logPath(m_inv);
+    auto auxFile = auxPath(m_inv);
+    return ToolContext(m_inv, m_hasher,
+        [logFile]() {
+            return LogParser {}.parse(logFile).value_or(LogRecord {});
+        },
+        [auxFile]() {
+            if (!fs::exists(auxFile))
+                return AuxRecord {};
+            return AuxParser {}.parse(auxFile).value_or(AuxRecord {});
+        });
 }
 
 // ── BuildDriver::updateGraphFromFls ───────────────────────────────────────────
@@ -88,7 +109,7 @@ void BuildDriver::updateGraphFromFls(const std::filesystem::path& fls,
     for (const auto& p : rec.inputs)
         inputPaths.insert(fs::weakly_canonical(p).string());
 
-    auto& latexRule = m_graph.getOrAddRule(std::string(m_engine.name()));
+    auto& latexRule = m_graph.getOrAddRule(engineRuleName());
 
     for (const auto& p : rec.inputs) {
         auto& node = m_graph.getOrAddFile(p, FileRole::Source);
@@ -132,13 +153,51 @@ bool BuildDriver::tryIncrementalSkip(FileStateTracker& tracker)
 
     updateGraphFromFls(fls, m_inv.outputDir);
 
-    auto* latexRule = m_graph.findRule(std::string(m_engine.name()));
+    auto* latexRule = m_graph.findRule(engineRuleName());
     if (!latexRule || latexRule->inputs().empty())
         return false;
 
     for (auto* node : latexRule->inputs())
         node->refresh(tracker);
-    return !latexRule->isStale(m_db);
+    if (latexRule->isStale(m_db))
+        return false;
+
+    // Inputs are unchanged, but a deleted output (the PDF, the .aux) still
+    // requires a rebuild — isStale only looks at inputs.
+    for (auto* node : latexRule->outputs()) {
+        if (!fs::exists(node->path()))
+            return false;
+    }
+
+    // The engine's inputs don't cover auxiliary-tool dependencies: .bib files
+    // are read by bibtex, not latex, and never appear in the .fls. Each tool
+    // that would fire now must prove its recorded inputs are unchanged since
+    // the last successful build.
+    if (m_tools.empty())
+        return true;
+
+    auto ctx = makeToolContext();
+    for (auto* tool : m_tools) {
+        if (tool->decide(ctx) != RunDecision::Run)
+            continue;
+
+        auto ruleName = toolRuleName(*tool);
+        auto& toolRule = m_graph.getOrAddRule(ruleName);
+        for (const auto& p : tool->trackedInputs(ctx))
+            toolRule.addInput(&m_graph.getOrAddFile(p, FileRole::Source));
+        for (auto* node : toolRule.inputs())
+            node->refresh(tracker);
+        if (toolRule.isStale(m_db))
+            return false;
+
+        // isStale walks the rule's *current* inputs; a recorded input that no
+        // longer exists (e.g. a deleted .bib) is invisible to it.
+        for (const auto& [path, hash] : m_db.getRuleInputs(ruleName)) {
+            if (!fs::exists(path))
+                return false;
+        }
+    }
+    return true;
 }
 
 // ── BuildDriver::persistEnginePass ───────────────────────────────────────────
@@ -173,8 +232,25 @@ BuildDriver::ToolPassOutcome BuildDriver::runAuxiliaryTools(ToolContext& ctx)
         }
         tool->onSuccess(ctx);
         outcome.filesChanged = true;
+        outcome.ranTools.push_back(tool);
     }
     return outcome;
+}
+
+// ── BuildDriver::persistToolRules ─────────────────────────────────────────────
+
+void BuildDriver::persistToolRules(FileStateTracker& tracker,
+    const ToolContext& ctx,
+    const std::vector<ITool*>& ranTools)
+{
+    for (auto* tool : ranTools) {
+        auto& rule = m_graph.getOrAddRule(toolRuleName(*tool));
+        for (const auto& p : tool->trackedInputs(ctx))
+            rule.addInput(&m_graph.getOrAddFile(p, FileRole::Source));
+        for (auto* node : rule.inputs())
+            node->refresh(tracker);
+        rule.markRan(m_db, true, std::string(tool->name()));
+    }
 }
 
 // ── BuildDriver::run ─────────────────────────────────────────────────────────
@@ -189,13 +265,15 @@ DriverResult BuildDriver::run()
         return result;
     }
 
+    std::vector<ITool*> ranTools;
+
     for (int pass = 0; pass < m_maxPasses; ++pass) {
         auto beforeSnapshot = takeSnapshot(tracker);
 
         auto engineResult = m_engine.run(m_inv).get();
         ++result.passes;
 
-        auto& latexRule = m_graph.getOrAddRule(std::string(m_engine.name()));
+        auto& latexRule = m_graph.getOrAddRule(engineRuleName());
 
         if (!engineResult.success()) {
             latexRule.markRan(m_db, false, m_inv.texFile.string());
@@ -209,17 +287,7 @@ DriverResult BuildDriver::run()
 
         bool filesChanged = (takeSnapshot(tracker) != beforeSnapshot);
 
-        auto logFile = logPath(m_inv);
-        auto auxFile = auxPath(m_inv);
-        ToolContext ctx(m_inv, m_hasher,
-            [logFile]() {
-                return LogParser {}.parse(logFile).value_or(LogRecord {});
-            },
-            [auxFile]() {
-                if (!fs::exists(auxFile))
-                    return AuxRecord {};
-                return AuxParser {}.parse(auxFile).value_or(AuxRecord {});
-            });
+        auto ctx = makeToolContext();
 
         auto toolOutcome = runAuxiliaryTools(ctx);
         if (toolOutcome.failure) {
@@ -228,9 +296,17 @@ DriverResult BuildDriver::run()
             result.diagnostics = diagnostics::extract(*toolOutcome.failure);
             return result;
         }
+        for (auto* tool : toolOutcome.ranTools) {
+            if (std::find(ranTools.begin(), ranTools.end(), tool) == ranTools.end())
+                ranTools.push_back(tool);
+        }
         filesChanged = filesChanged || toolOutcome.filesChanged;
 
         if (!ctx.log().rerunNeeded && !filesChanged) {
+            // Tool input hashes are recorded only now, post-convergence, so
+            // they reflect the final on-disk contents (latex rewrites .bcf
+            // and .aux on every pass).
+            persistToolRules(tracker, ctx, ranTools);
             result.success = true;
             result.diagnostics = diagnostics::extract(engineResult);
             return result;

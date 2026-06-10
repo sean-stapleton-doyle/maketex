@@ -34,14 +34,26 @@ std::vector<std::string> HashTriggeredTool::buildArgs(const ToolInvocation& inv)
     return argv;
 }
 
+fs::path HashTriggeredTool::triggerPath(const ToolContext& ctx) const
+{
+    const auto& inv = ctx.inv();
+    return inv.outputDir / (inv.resolvedJobName() + m_triggerExtension);
+}
+
+std::vector<fs::path> HashTriggeredTool::trackedInputs(const ToolContext& ctx) const
+{
+    auto trigger = triggerPath(ctx);
+    if (!fs::exists(trigger))
+        return {};
+    return { trigger };
+}
+
 RunDecision HashTriggeredTool::decide(const ToolContext& ctx)
 {
     if (m_runOnce && m_hasRun)
         return RunDecision::Done;
 
-    const auto& inv = ctx.inv();
-    auto trigger = inv.outputDir
-        / (inv.jobName.value_or(inv.texFile.stem().string()) + m_triggerExtension);
+    auto trigger = triggerPath(ctx);
     if (!fs::exists(trigger))
         return RunDecision::Skip;
 

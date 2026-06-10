@@ -15,6 +15,13 @@ public:
     RunDecision decide(const ToolContext& ctx) override;
     void onSuccess(const ToolContext& ctx) override;
 
+    // The .aux file plus every \bibdata database resolvable next to the
+    // document or in the output directory. .bib files found only via
+    // TEXINPUTS elsewhere are not tracked — edits to those won't invalidate
+    // the incremental skip.
+    std::vector<std::filesystem::path> trackedInputs(
+        const ToolContext& ctx) const override;
+
     // argv: { "bibtex", "<jobName>" }
     // Runs from workingDir (= outputDir). TeX Live openout_any=p rejects
     // absolute paths for output files; bare job name avoids this.

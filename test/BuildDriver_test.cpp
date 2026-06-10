@@ -344,6 +344,139 @@ TEST_F(BuildDriverTest, secondInvocationRunsWhenSourceChanges)
     EXPECT_EQ(secondEngine.callCount(), 1);
 }
 
+TEST_F(BuildDriverTest, skipFailsWhenOutputDeleted)
+{
+    const fs::path texFile = m_dir / "main.tex";
+    const fs::path pdfFile = m_dir / "main.pdf";
+    auto flsEntry = "PWD " + m_dir.string() + "\n"
+        + "INPUT " + texFile.string() + "\n"
+        + "OUTPUT " + pdfFile.string() + "\n";
+
+    FakeEngine firstEngine({ FakeCall {
+        .writes = {
+            { m_dir / "main.fls", flsEntry },
+            { m_dir / "main.log", "This is pdfTeX\n" },
+            { pdfFile, "%PDF-1.5\n" },
+        },
+    } });
+    BuildDriver firstDriver(firstEngine, m_db, m_hasher, makeInv());
+    ASSERT_TRUE(firstDriver.run().success);
+
+    // Inputs unchanged, but the product was deleted — must rebuild.
+    fs::remove(pdfFile);
+
+    FakeEngine secondEngine({ FakeCall {
+        .writes = {
+            { m_dir / "main.fls", flsEntry },
+            { m_dir / "main.log", "This is pdfTeX\n" },
+            { pdfFile, "%PDF-1.5\n" },
+        },
+    } });
+    BuildDriver secondDriver(secondEngine, m_db, m_hasher, makeInv());
+    auto res = secondDriver.run();
+
+    EXPECT_TRUE(res.success);
+    EXPECT_EQ(res.passes, 1);
+    EXPECT_TRUE(fs::exists(pdfFile));
+}
+
+TEST_F(BuildDriverTest, documentsInSameDirectoryKeepSeparateRuleState)
+{
+    // Two documents sharing one directory (and one state db) must not clobber
+    // each other's incremental state: rule identity includes the job name.
+    std::ofstream(m_dir / "other.tex") << "\\documentclass{article}";
+
+    auto invFor = [&](const std::string& stem) {
+        return EngineInvocation {
+            .texFile = m_dir / (stem + ".tex"),
+            .outputDir = m_dir,
+            .auxDir = m_dir,
+        };
+    };
+    auto callFor = [&](const std::string& stem) {
+        return FakeCall { .writes = {
+            { m_dir / (stem + ".fls"),
+                "PWD " + m_dir.string() + "\n"
+                    + "INPUT " + (m_dir / (stem + ".tex")).string() + "\n" },
+            { m_dir / (stem + ".log"), "This is pdfTeX\n" },
+        } };
+    };
+
+    FakeEngine engineA({ callFor("main") });
+    ASSERT_TRUE(BuildDriver(engineA, m_db, m_hasher, invFor("main")).run().success);
+
+    FakeEngine engineB({ callFor("other") });
+    ASSERT_TRUE(BuildDriver(engineB, m_db, m_hasher, invFor("other")).run().success);
+
+    // Rebuilding the first document with nothing changed must still skip,
+    // even though the second document was built in between.
+    FakeEngine engineA2({});
+    auto res = BuildDriver(engineA2, m_db, m_hasher, invFor("main")).run();
+
+    EXPECT_TRUE(res.success);
+    EXPECT_EQ(res.passes, 0);
+    EXPECT_EQ(engineA2.callCount(), 0);
+}
+
+TEST_F(BuildDriverTest, toolTriggerChangeDefeatsIncrementalSkip)
+{
+    // A .bcf-style trigger file changes between invocations; the engine's own
+    // inputs are untouched. The skip path must notice the tool is stale.
+    const fs::path texFile = m_dir / "main.tex";
+    const fs::path bcfFile = m_dir / "main.bcf";
+    auto flsEntry = "PWD " + m_dir.string() + "\n"
+        + "INPUT " + texFile.string() + "\n";
+    auto engineCall = [&] {
+        return FakeCall { .writes = {
+            { m_dir / "main.fls", flsEntry },
+            { m_dir / "main.log", "This is pdfTeX\n" },
+        } };
+    };
+
+    maketex::ToolFactory factory(m_hasher);
+    maketex::ToolRunner toolRunner(m_executor);
+
+    // First session: engine writes the .bcf, tool fires, build converges and
+    // records the tool's input hash.
+    {
+        auto firstCall = engineCall();
+        firstCall.writes.emplace_back(bcfFile, "bcf v1\n");
+        FakeEngine engine({ firstCall, engineCall() });
+        auto biber = factory.hashTriggered(
+            "biber", ".bcf", { "true" }, InvokerKind::Biber, /*runOnce=*/true);
+        BuildDriver driver(engine, m_db, m_hasher, makeInv(),
+            BuildDriver::kDefaultMaxPasses, { biber.get() }, &toolRunner);
+        ASSERT_TRUE(driver.run().success);
+    }
+
+    // Second session, nothing changed: tool's recorded input matches → skip.
+    {
+        FakeEngine engine({});
+        auto biber = factory.hashTriggered(
+            "biber", ".bcf", { "true" }, InvokerKind::Biber, /*runOnce=*/true);
+        BuildDriver driver(engine, m_db, m_hasher, makeInv(),
+            BuildDriver::kDefaultMaxPasses, { biber.get() }, &toolRunner);
+        auto res = driver.run();
+        EXPECT_TRUE(res.success);
+        EXPECT_EQ(res.passes, 0);
+    }
+
+    // Third session: the trigger file changed (e.g. the .bib edit propagated
+    // into the .bcf) — skip must fail and the tool must run again.
+    std::ofstream(bcfFile) << "bcf v2\n";
+    {
+        FakeEngine engine({ engineCall(), engineCall() });
+        auto biber = factory.hashTriggered(
+            "biber", ".bcf", { "true" }, InvokerKind::Biber, /*runOnce=*/true);
+        BuildDriver driver(engine, m_db, m_hasher, makeInv(),
+            BuildDriver::kDefaultMaxPasses, { biber.get() }, &toolRunner);
+        auto res = driver.run();
+        EXPECT_TRUE(res.success);
+        EXPECT_GE(res.passes, 1);
+        EXPECT_GE(engine.callCount(), 1);
+    }
+}
+
 TEST_F(BuildDriverTest, hashTriggeredToolFiresOnBcfChange)
 {
     // biber-style: HashTriggeredTool fires when the .bcf hash changes.
