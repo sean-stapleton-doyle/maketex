@@ -10,18 +10,12 @@
 
 namespace maketex {
 
+// Citation changes don't need parsing: rerun decisions hash the whole .aux
+// file (BibtexTool::trackedInputs), which subsumes per-key tracking.
 struct AuxRecord {
-    // Deduplicated citation keys extracted from "\\citation{}" lines.
-    // Non-empty means bibtex/biber may need to run (cross-check with bibDataFiles).
-    std::vector<std::string> citations;
-
     // Bare database names from "\\bibdata{}" lines — no .bib extension.
     // The caller is responsible for locating the actual files via TEXINPUTS.
     std::vector<std::string> bibDataFiles;
-
-    // Paths of included sub-aux files from "\\@input{}" lines, weakly-canonical.
-    // Produced by the LaTeX \include{} command — each must be parsed separately.
-    std::vector<std::filesystem::path> inputs;
 };
 
 class AuxParser {

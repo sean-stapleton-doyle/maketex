@@ -91,8 +91,7 @@ ToolContext BuildDriver::makeToolContext() const
 
 // ── BuildDriver::updateGraphFromFls ───────────────────────────────────────────
 
-void BuildDriver::updateGraphFromFls(const std::filesystem::path& fls,
-    const std::filesystem::path& /*pwd*/)
+void BuildDriver::updateGraphFromFls(const std::filesystem::path& fls)
 {
     FlsParser parser;
     for (const auto& prefix : m_ignorePrefixes)
@@ -151,7 +150,7 @@ bool BuildDriver::tryIncrementalSkip(FileStateTracker& tracker)
     if (!fs::exists(fls))
         return false;
 
-    updateGraphFromFls(fls, m_inv.outputDir);
+    updateGraphFromFls(fls);
 
     auto* latexRule = m_graph.findRule(engineRuleName());
     if (!latexRule || latexRule->inputs().empty())
@@ -210,7 +209,7 @@ void BuildDriver::persistEnginePass(FileStateTracker& tracker, RuleNode& latexRu
     // invocation's isStale check.
     auto fls = flsPath(m_inv);
     if (fs::exists(fls))
-        updateGraphFromFls(fls, m_inv.outputDir);
+        updateGraphFromFls(fls);
     for (auto* node : latexRule.inputs())
         node->refresh(tracker);
     latexRule.markRan(m_db, true, m_inv.texFile.string());

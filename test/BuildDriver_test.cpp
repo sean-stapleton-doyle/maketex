@@ -129,7 +129,6 @@ protected:
         return EngineInvocation {
             .texFile = m_dir / "main.tex",
             .outputDir = m_dir,
-            .auxDir = m_dir,
         };
     }
 };
@@ -379,7 +378,6 @@ TEST_F(BuildDriverTest, documentsInSameDirectoryKeepSeparateRuleState)
         return EngineInvocation {
             .texFile = m_dir / (stem + ".tex"),
             .outputDir = m_dir,
-            .auxDir = m_dir,
         };
     };
     auto callFor = [&](const std::string& stem) {

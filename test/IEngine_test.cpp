@@ -29,7 +29,7 @@ TEST(IEngine, mockImplementsInterface)
 TEST(IEngine, mockRunReturnsSuccess)
 {
     MockEngine engine;
-    EngineInvocation inv { .texFile = "/a/main.tex", .outputDir = "/a", .auxDir = "/a" };
+    EngineInvocation inv { .texFile = "/a/main.tex", .outputDir = "/a" };
     auto result = engine.run(inv);
     EXPECT_TRUE(result.success());
 }

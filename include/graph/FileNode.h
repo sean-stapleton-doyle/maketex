@@ -15,9 +15,8 @@ enum class FileRole {
 
 // A node in the build dependency graph representing a single file.
 //
-// refresh() snapshots the file's current state via the tracker and caches it.
-// The loop driver saves the return value before running a rule, then calls
-// refresh() again afterwards and uses changed() to decide whether to rerun.
+// refresh() snapshots the file's current state via the tracker and caches it;
+// the loop driver compares snapshots across passes to detect convergence.
 class FileNode {
 public:
     FileNode(std::filesystem::path path, FileRole role);
@@ -36,10 +35,6 @@ public:
     // True once refresh() has run — distinguishes a real absent-on-disk state
     // from the never-snapshotted default, so callers don't persist the latter.
     bool hasFreshState() const { return m_refreshed; }
-
-    // Returns true if before and after represent a meaningful content change:
-    // either existence changed, or both exist and their hashes differ.
-    static bool changed(const FileState& before, const FileState& after);
 
 private:
     std::filesystem::path m_path;

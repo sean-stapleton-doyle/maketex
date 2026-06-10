@@ -17,17 +17,6 @@ std::expected<LogRecord, std::error_code> LogParser::parse(
         if (line.contains("Rerun to get") || line.contains("Please rerun LaTeX")
             || line.contains("Please (re)run LaTeX"))
             rec.rerunNeeded = true;
-
-        // Secondary bibtex signal (primary trigger is AuxParser \bibdata detection).
-        if (line.contains("run BibTeX") || line.contains("run bibtex"))
-            rec.bibtexRerunNeeded = true;
-
-        if (line.contains("There were undefined references"))
-            rec.undefinedReferences = true;
-
-        // "LaTeX Warning: Citation `foo' on page 1 undefined"
-        if (line.contains("Citation") && line.contains("undefined"))
-            rec.undefinedCitations = true;
     });
     if (!r)
         return std::unexpected(r.error());

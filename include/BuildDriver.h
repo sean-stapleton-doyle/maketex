@@ -88,8 +88,7 @@ private:
     void persistFileStates();
 
     // Parse .fls and wire up FileNode/RuleNode edges in m_graph.
-    void updateGraphFromFls(const std::filesystem::path& flsPath,
-        const std::filesystem::path& pwd);
+    void updateGraphFromFls(const std::filesystem::path& flsPath);
 
     // Returns the current hash of every Generated FileNode that exists on disk.
     std::unordered_map<std::string, Hash> takeSnapshot(FileStateTracker& tracker);
