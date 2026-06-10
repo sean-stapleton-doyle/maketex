@@ -372,9 +372,9 @@ std::vector<Diagnostic> extract(const RunResult<EngineInvocation>& result)
     case InvokerKind::XeLaTeX:
     case InvokerKind::LuaLaTeX:
         if (result.success())
-            diags = extractLatexWarnings(result.stdoutOutput, result.invocation->texFile);
+            diags = extractLatexWarnings(result.stdoutOutput, result.invocation.texFile);
         else
-            diags = extractLatex(result.stdoutOutput, result.invocation->texFile);
+            diags = extractLatex(result.stdoutOutput, result.invocation.texFile);
         break;
     default:
         break;

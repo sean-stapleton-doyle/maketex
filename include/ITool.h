@@ -29,9 +29,9 @@ concept Tool = requires(T t, const ToolInvocation& inv, const ToolContext& ctx) 
 // Auxiliary LaTeX tools (biber, bibtex, makeindex, etc.).
 //
 // Tools are pure descriptions of how/when to invoke an external program;
-// execution is performed by ToolRunner, which composes an ITool with a
-// tf::Executor. Adding a new tool means: subclass ITool, implement the
-// hooks, register it with BuildDriver.
+// execution is performed by BuildDriver via launchProcess(). Adding a new
+// tool means: subclass ITool, implement the hooks, register it with
+// BuildDriver.
 class ITool {
 public:
     virtual ~ITool() = default;

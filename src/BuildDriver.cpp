@@ -4,10 +4,10 @@
 #include "FileStateTracker.h"
 #include "IFileHasher.h"
 #include "ITool.h"
+#include "Launch.h"
 #include "RunDecision.h"
 #include "ToolContext.h"
 #include "ToolInvocation.h"
-#include "ToolRunner.h"
 #include "graph/FileNode.h"
 #include "parsers/AuxParser.h"
 #include "parsers/FlsParser.h"
@@ -27,7 +27,6 @@ BuildDriver::BuildDriver(IEngine& engine,
     EngineInvocation inv,
     int maxPasses,
     std::vector<ITool*> tools,
-    ToolRunner* toolRunner,
     std::vector<std::filesystem::path> ignorePrefixes)
     : m_engine(engine)
     , m_db(db)
@@ -35,11 +34,8 @@ BuildDriver::BuildDriver(IEngine& engine,
     , m_inv(std::move(inv))
     , m_maxPasses(maxPasses)
     , m_tools(std::move(tools))
-    , m_toolRunner(toolRunner)
     , m_ignorePrefixes(std::move(ignorePrefixes))
 {
-    assert((m_tools.empty() || m_toolRunner != nullptr)
-        && "BuildDriver: tools require a non-null ToolRunner");
 }
 
 // ── helpers ───────────────────────────────────────────────────────────────────
@@ -240,7 +236,9 @@ BuildDriver::ToolPassOutcome BuildDriver::runAuxiliaryTools(ToolContext& ctx)
     for (auto* tool : m_tools) {
         if (tool->decide(ctx) != RunDecision::Run)
             continue;
-        auto toolResult = m_toolRunner->run(*tool, makeToolInv(m_inv)).get();
+        auto toolInv = makeToolInv(m_inv);
+        auto toolResult = launchProcess(tool->buildArgs(toolInv),
+            toolInv.workingDir, tool->invokerKind(), std::move(toolInv));
         if (!toolResult.success()) {
             outcome.failedToolName = std::string(tool->name());
             outcome.failure = std::move(toolResult);
@@ -293,7 +291,7 @@ DriverResult BuildDriver::run()
     for (int pass = 0; pass < m_maxPasses; ++pass) {
         auto beforeSnapshot = takeSnapshot(tracker);
 
-        auto engineResult = m_engine.run(m_inv).get();
+        auto engineResult = m_engine.run(m_inv);
         ++result.passes;
 
         auto& latexRule = m_graph.getOrAddRule(engineRuleName());

@@ -21,7 +21,6 @@ class IFileHasher;
 class ITool;
 class RuleNode;
 class ToolContext;
-class ToolRunner;
 
 // Result of a complete BuildDriver run.
 struct DriverResult {
@@ -45,17 +44,15 @@ class BuildDriver {
 public:
     static constexpr int kDefaultMaxPasses = 8;
 
-    // engine, db, hasher, and toolRunner are non-owning — caller must ensure
-    // they outlive the driver. toolRunner may be null only when tools is empty.
-    // Files under any ignorePrefix (e.g. the TeX distribution roots) are
-    // excluded from dependency tracking entirely.
+    // engine, db, hasher, and tools are non-owning — caller must ensure they
+    // outlive the driver. Files under any ignorePrefix (e.g. the TeX
+    // distribution roots) are excluded from dependency tracking entirely.
     BuildDriver(IEngine& engine,
         StateDatabase& db,
         IFileHasher& hasher,
         EngineInvocation inv,
         int maxPasses = kDefaultMaxPasses,
         std::vector<ITool*> tools = {},
-        ToolRunner* toolRunner = nullptr,
         std::vector<std::filesystem::path> ignorePrefixes = {});
 
     DriverResult run();
@@ -106,7 +103,7 @@ private:
     // refresh rule inputs from disk, and persist input hashes via markRan(true).
     void persistEnginePass(FileStateTracker& tracker, RuleNode& latexRule);
 
-    // Iterates m_tools, running any that decide() Run via m_toolRunner.
+    // Iterates m_tools, running any that decide() Run.
     // Stops at the first failure; reports it via outcome.failure.
     ToolPassOutcome runAuxiliaryTools(ToolContext& ctx);
 
@@ -116,7 +113,6 @@ private:
     EngineInvocation m_inv;
     int m_maxPasses;
     std::vector<ITool*> m_tools;
-    ToolRunner* m_toolRunner;
     std::vector<std::filesystem::path> m_ignorePrefixes;
 
     BuildGraph m_graph;
