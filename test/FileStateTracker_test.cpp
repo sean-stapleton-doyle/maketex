@@ -102,7 +102,7 @@ TEST_F(FileStateTrackerTest, fastPath_skipsHasher_whenMtimeAndSizeMatch)
     FileState stored {
         .path = p.string(),
         .exists = true,
-        .mtime = static_cast<int64_t>(st.st_mtime),
+        .mtime = FileStateTracker::modificationTimeNanos(st),
         .size = static_cast<int64_t>(st.st_size),
         .hash = storedHash,
     };

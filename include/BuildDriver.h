@@ -16,8 +16,8 @@
 
 namespace maketex {
 
-class Blake3Hasher;
 class FileStateTracker;
+class IFileHasher;
 class ITool;
 class RuleNode;
 class ToolContext;
@@ -47,13 +47,16 @@ public:
 
     // engine, db, hasher, and toolRunner are non-owning — caller must ensure
     // they outlive the driver. toolRunner may be null only when tools is empty.
+    // Files under any ignorePrefix (e.g. the TeX distribution roots) are
+    // excluded from dependency tracking entirely.
     BuildDriver(IEngine& engine,
         StateDatabase& db,
-        Blake3Hasher& hasher,
+        IFileHasher& hasher,
         EngineInvocation inv,
         int maxPasses = kDefaultMaxPasses,
         std::vector<ITool*> tools = {},
-        ToolRunner* toolRunner = nullptr);
+        ToolRunner* toolRunner = nullptr,
+        std::vector<std::filesystem::path> ignorePrefixes = {});
 
     DriverResult run();
 
@@ -83,6 +86,10 @@ private:
         const ToolContext& ctx,
         const std::vector<ITool*>& ranTools);
 
+    // Writes every refreshed FileNode's state to the database so the next
+    // invocation's (mtime, size) fast path avoids rehashing unchanged files.
+    void persistFileStates();
+
     // Parse .fls and wire up FileNode/RuleNode edges in m_graph.
     void updateGraphFromFls(const std::filesystem::path& flsPath,
         const std::filesystem::path& pwd);
@@ -105,11 +112,12 @@ private:
 
     IEngine& m_engine;
     StateDatabase& m_db;
-    Blake3Hasher& m_hasher;
+    IFileHasher& m_hasher;
     EngineInvocation m_inv;
     int m_maxPasses;
     std::vector<ITool*> m_tools;
     ToolRunner* m_toolRunner;
+    std::vector<std::filesystem::path> m_ignorePrefixes;
 
     BuildGraph m_graph;
 };

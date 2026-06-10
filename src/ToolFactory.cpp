@@ -7,7 +7,7 @@
 
 namespace maketex {
 
-ToolFactory::ToolFactory(Blake3Hasher& hasher)
+ToolFactory::ToolFactory(IFileHasher& hasher)
     : m_hasher(hasher)
 {
 }

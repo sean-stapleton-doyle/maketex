@@ -47,6 +47,11 @@ public:
     std::optional<FileState> getFileState(const std::string& path) const;
     void upsertFileState(const FileState& state);
 
+    // Batched upsert in a single transaction — used by the loop driver to
+    // persist every tracked file's state at the end of a build so the next
+    // invocation's (mtime, size) fast path can skip rehashing.
+    void upsertFileStates(const std::vector<FileState>& states);
+
     // Rule records ────────────────────────────────────────────────────────────
 
     std::optional<RuleRecord> getRule(const std::string& name) const;

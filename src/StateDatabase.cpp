@@ -90,6 +90,14 @@ void StateDatabase::upsertFileState(const FileState& state)
     s.exec();
 }
 
+void StateDatabase::upsertFileStates(const std::vector<FileState>& states)
+{
+    SQLite::Transaction tx(*m_db);
+    for (const auto& state : states)
+        upsertFileState(state);
+    tx.commit();
+}
+
 // ── Rule records ──────────────────────────────────────────────────────────────
 
 std::optional<RuleRecord> StateDatabase::getRule(const std::string& name) const

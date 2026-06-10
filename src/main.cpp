@@ -4,6 +4,7 @@
 #include "EngineInvocation.h"
 #include "ITool.h"
 #include "InvokerKind.h"
+#include "Process.h"
 #include "StateDatabase.h"
 #include "ToolFactory.h"
 #include "ToolRunner.h"
@@ -18,6 +19,32 @@
 #include <vector>
 
 namespace fs = std::filesystem;
+
+// TeX distribution roots (TEXMFROOT, system/user caches), resolved via
+// kpsewhich. Files under these are excluded from dependency tracking — the
+// engine reads hundreds of .sty/.cls/font files per pass, and treating them
+// as inputs would mean hashing the whole distribution closure every build.
+// Returns an empty list (track everything) when kpsewhich is unavailable.
+static std::vector<fs::path> texSystemRoots()
+{
+    std::vector<fs::path> roots;
+    for (const char* var : { "TEXMFROOT", "TEXMFSYSVAR", "TEXMFVAR" }) {
+        try {
+            std::vector<std::string> args { "kpsewhich", "-var-value", var };
+            auto result = maketex::Process(args).wait();
+            if (result.exitCode != 0)
+                continue;
+            auto value = result.stdoutOutput;
+            while (!value.empty() && (value.back() == '\n' || value.back() == '\r'))
+                value.pop_back();
+            if (!value.empty())
+                roots.emplace_back(value);
+        } catch (const std::system_error&) {
+            break; // kpsewhich not installed — nothing to ignore
+        }
+    }
+    return roots;
+}
 
 int main(int argc, char* argv[])
 {
@@ -79,7 +106,8 @@ int main(int argc, char* argv[])
     std::cout << "maketex: building " << texFile.filename().string() << "\n";
 
     maketex::BuildDriver driver(engine, stateDb, hasher, inv,
-        maketex::BuildDriver::kDefaultMaxPasses, std::move(toolPtrs), &toolRunner);
+        maketex::BuildDriver::kDefaultMaxPasses, std::move(toolPtrs), &toolRunner,
+        texSystemRoots());
     auto result = driver.run();
 
     if (result.success) {

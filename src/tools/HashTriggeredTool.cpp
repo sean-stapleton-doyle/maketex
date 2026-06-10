@@ -1,7 +1,7 @@
 #include "tools/HashTriggeredTool.h"
 
-#include "Blake3Hasher.h"
 #include "EngineInvocation.h"
+#include "IFileHasher.h"
 
 #include <filesystem>
 #include <utility>
@@ -14,7 +14,7 @@ HashTriggeredTool::HashTriggeredTool(std::string name,
     std::string triggerExtension,
     std::vector<std::string> argv,
     InvokerKind kind,
-    Blake3Hasher& hasher,
+    IFileHasher& hasher,
     bool runOnce)
     : m_name(std::move(name))
     , m_triggerExtension(std::move(triggerExtension))

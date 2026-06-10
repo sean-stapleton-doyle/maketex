@@ -16,6 +16,17 @@ void FileStateTracker::setIgnorePattern(std::string extension, std::regex patter
     m_ignorePatterns.insert_or_assign(std::move(extension), std::move(pattern));
 }
 
+int64_t FileStateTracker::modificationTimeNanos(const struct stat& st)
+{
+#ifdef __APPLE__
+    const auto& ts = st.st_mtimespec;
+#else
+    const auto& ts = st.st_mtim;
+#endif
+    return static_cast<int64_t>(ts.tv_sec) * 1'000'000'000
+        + static_cast<int64_t>(ts.tv_nsec);
+}
+
 std::expected<FileState, std::error_code> FileStateTracker::snapshot(
     const std::filesystem::path& path) const
 {
@@ -26,7 +37,7 @@ std::expected<FileState, std::error_code> FileStateTracker::snapshot(
         return std::unexpected(std::error_code(errno, std::system_category()));
     }
 
-    auto mtime = static_cast<int64_t>(st.st_mtime);
+    auto mtime = modificationTimeNanos(st);
     auto size = static_cast<int64_t>(st.st_size);
 
     // Fast path: reuse the stored hash when mtime and size are unchanged.
