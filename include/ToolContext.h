@@ -5,7 +5,6 @@
 
 namespace maketex {
 
-class Blake3Hasher;
 struct AuxRecord;
 struct EngineInvocation;
 struct LogRecord;
@@ -22,7 +21,6 @@ public:
     using AuxSource = std::function<AuxRecord()>;
 
     ToolContext(const EngineInvocation& inv,
-        Blake3Hasher& hasher,
         LogSource logSource,
         AuxSource auxSource);
     ~ToolContext();
@@ -31,14 +29,12 @@ public:
     ToolContext& operator=(const ToolContext&) = delete;
 
     const EngineInvocation& inv() const { return m_inv; }
-    Blake3Hasher& hasher() const { return m_hasher; }
 
     const LogRecord& log() const;
     const AuxRecord& aux() const;
 
 private:
     const EngineInvocation& m_inv;
-    Blake3Hasher& m_hasher;
     LogSource m_logSource;
     AuxSource m_auxSource;
     mutable std::unique_ptr<LogRecord> m_log;

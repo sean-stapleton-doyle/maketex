@@ -33,6 +33,10 @@ public:
     // The state from the most recent refresh(). Default (exists=false) if never refreshed.
     const FileState& state() const { return m_state; }
 
+    // True once refresh() has run — distinguishes a real absent-on-disk state
+    // from the never-snapshotted default, so callers don't persist the latter.
+    bool hasFreshState() const { return m_refreshed; }
+
     // Returns true if before and after represent a meaningful content change:
     // either existence changed, or both exist and their hashes differ.
     static bool changed(const FileState& before, const FileState& after);
@@ -41,6 +45,7 @@ private:
     std::filesystem::path m_path;
     FileRole m_role;
     FileState m_state;
+    bool m_refreshed = false;
 };
 
 } // namespace maketex

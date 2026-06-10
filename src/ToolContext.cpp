@@ -8,11 +8,9 @@
 namespace maketex {
 
 ToolContext::ToolContext(const EngineInvocation& inv,
-    Blake3Hasher& hasher,
     LogSource logSource,
     AuxSource auxSource)
     : m_inv(inv)
-    , m_hasher(hasher)
     , m_logSource(std::move(logSource))
     , m_auxSource(std::move(auxSource))
 {

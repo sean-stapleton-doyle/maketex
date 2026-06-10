@@ -9,7 +9,7 @@
 
 namespace maketex {
 
-class Blake3Hasher;
+class IFileHasher;
 
 // Auxiliary tool that runs whenever the hash of a trigger file changes.
 //
@@ -27,7 +27,7 @@ public:
         std::string triggerExtension,
         std::vector<std::string> argv,
         InvokerKind kind,
-        Blake3Hasher& hasher,
+        IFileHasher& hasher,
         bool runOnce = false);
 
     std::string_view name() const override { return m_name; }
@@ -45,7 +45,7 @@ private:
     std::string m_triggerExtension;
     std::vector<std::string> m_argvTemplate;
     InvokerKind m_kind;
-    Blake3Hasher& m_hasher;
+    IFileHasher& m_hasher;
     bool m_runOnce;
 
     // Trigger state, updated across passes via decide()/onSuccess().

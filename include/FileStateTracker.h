@@ -7,6 +7,7 @@
 #include <filesystem>
 #include <regex>
 #include <string>
+#include <sys/stat.h>
 #include <system_error>
 #include <unordered_map>
 
@@ -36,6 +37,11 @@ public:
     // stat/open (permission denied, I/O error, etc.).
     std::expected<FileState, std::error_code> snapshot(
         const std::filesystem::path& path) const;
+
+    // Nanosecond-resolution modification time as stored in FileState::mtime.
+    // Whole-second granularity would let a same-size rewrite within one
+    // second falsely hit the fast path and return a stale hash.
+    static int64_t modificationTimeNanos(const struct stat& st);
 
 private:
     const StateDatabase& m_db;

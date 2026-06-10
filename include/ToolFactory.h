@@ -8,7 +8,7 @@
 
 namespace maketex {
 
-class Blake3Hasher;
+class IFileHasher;
 class ITool;
 
 // Constructs ITool instances, holding shared dependencies (the file hasher).
@@ -16,7 +16,7 @@ class ITool;
 class ToolFactory {
 public:
     // hasher is non-owning — caller must ensure it outlives the tools.
-    explicit ToolFactory(Blake3Hasher& hasher);
+    explicit ToolFactory(IFileHasher& hasher);
 
     // A tool that fires when <jobName><triggerExtension>'s hash changes.
     // "$job" in argv is replaced with the resolved job name at run time.
@@ -32,7 +32,7 @@ public:
     std::unique_ptr<ITool> bibtex();
 
 private:
-    Blake3Hasher& m_hasher;
+    IFileHasher& m_hasher;
 };
 
 } // namespace maketex

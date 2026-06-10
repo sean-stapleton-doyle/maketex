@@ -13,6 +13,8 @@
 #include "ToolInvocation.h"
 #include "ToolRunner.h"
 
+#include "test_utils.h"
+
 #include <gtest/gtest.h>
 
 #include <taskflow/taskflow.hpp>
@@ -112,11 +114,7 @@ private:
 
 // ── Fixture ───────────────────────────────────────────────────────────────────
 
-std::unique_ptr<SQLite::Database> makeMemoryDb()
-{
-    return std::make_unique<SQLite::Database>(
-        ":memory:", SQLite::OPEN_READWRITE | SQLite::OPEN_CREATE);
-}
+using maketex::test_utils::makeMemoryDb;
 
 class BuildDriverTest : public ::testing::Test {
 protected:
@@ -416,6 +414,73 @@ TEST_F(BuildDriverTest, documentsInSameDirectoryKeepSeparateRuleState)
     EXPECT_TRUE(res.success);
     EXPECT_EQ(res.passes, 0);
     EXPECT_EQ(engineA2.callCount(), 0);
+}
+
+TEST_F(BuildDriverTest, secondInvocationFastPathAvoidsRehashing)
+{
+    // With file states persisted at the end of a build, the next invocation's
+    // skip check satisfies itself via the (mtime, size) fast path — zero
+    // hashFile calls.
+    const fs::path texFile = m_dir / "main.tex";
+    auto flsEntry = "PWD " + m_dir.string() + "\n"
+        + "INPUT " + texFile.string() + "\n";
+
+    maketex::test_utils::MockHasher hasher;
+
+    FakeEngine firstEngine({ FakeCall {
+        .writes = {
+            { m_dir / "main.fls", flsEntry },
+            { m_dir / "main.log", "This is pdfTeX\n" },
+        },
+    } });
+    BuildDriver firstDriver(firstEngine, m_db, hasher, makeInv());
+    ASSERT_TRUE(firstDriver.run().success);
+    int callsAfterFirstBuild = hasher.callCount;
+    ASSERT_GT(callsAfterFirstBuild, 0);
+
+    FakeEngine secondEngine({});
+    BuildDriver secondDriver(secondEngine, m_db, hasher, makeInv());
+    auto res = secondDriver.run();
+
+    EXPECT_TRUE(res.success);
+    EXPECT_EQ(res.passes, 0);
+    EXPECT_EQ(hasher.callCount, callsAfterFirstBuild);
+}
+
+TEST_F(BuildDriverTest, ignoredPrefixFilesAreNotTracked)
+{
+    // Files under an ignore prefix (the TeX distribution) must not become
+    // dependencies: editing one does not defeat the incremental skip.
+    const fs::path texFile = m_dir / "main.tex";
+    const fs::path texmf = m_dir / "texmf";
+    fs::create_directories(texmf);
+    std::ofstream(texmf / "article.cls") << "% class v1\n";
+
+    auto flsEntry = "PWD " + m_dir.string() + "\n"
+        + "INPUT " + texFile.string() + "\n"
+        + "INPUT " + (texmf / "article.cls").string() + "\n";
+    std::vector<fs::path> prefixes { texmf };
+
+    FakeEngine firstEngine({ FakeCall {
+        .writes = {
+            { m_dir / "main.fls", flsEntry },
+            { m_dir / "main.log", "This is pdfTeX\n" },
+        },
+    } });
+    BuildDriver firstDriver(firstEngine, m_db, m_hasher, makeInv(),
+        BuildDriver::kDefaultMaxPasses, {}, nullptr, prefixes);
+    ASSERT_TRUE(firstDriver.run().success);
+
+    std::ofstream(texmf / "article.cls") << "% class v2, updated distro\n";
+
+    FakeEngine secondEngine({});
+    BuildDriver secondDriver(secondEngine, m_db, m_hasher, makeInv(),
+        BuildDriver::kDefaultMaxPasses, {}, nullptr, prefixes);
+    auto res = secondDriver.run();
+
+    EXPECT_TRUE(res.success);
+    EXPECT_EQ(res.passes, 0);
+    EXPECT_EQ(secondEngine.callCount(), 0);
 }
 
 TEST_F(BuildDriverTest, toolTriggerChangeDefeatsIncrementalSkip)
