@@ -31,21 +31,6 @@ CPMAddPackage(
 )
 CPMAddPackage("gh:SRombauts/SQLiteCpp#3.3.2")
 CPMAddPackage("gh:google/googletest#v1.16.0")
-CPMAddPackage(
-    NAME taskflow
-    GIT_REPOSITORY https://github.com/taskflow/taskflow
-    GIT_TAG v3.10.0
-    OPTIONS
-        "TF_BUILD_TESTS OFF"
-        "TF_BUILD_EXAMPLES OFF"
-)
-# Taskflow uses std::is_trivial which is deprecated in C++26.
-# Mark its headers as SYSTEM so the deprecation warnings don't surface in our builds.
-if(taskflow_ADDED)
-    get_target_property(_tf_inc Taskflow INTERFACE_INCLUDE_DIRECTORIES)
-    set_property(TARGET Taskflow PROPERTY
-        INTERFACE_SYSTEM_INCLUDE_DIRECTORIES "${_tf_inc}")
-endif()
 
 # ── Core library (shared by executable and tests) ─────────────────────────────
 add_library(maketex_lib STATIC
@@ -54,7 +39,6 @@ add_library(maketex_lib STATIC
     src/EngineBase.cpp
     src/ToolContext.cpp
     src/ToolFactory.cpp
-    src/ToolRunner.cpp
     src/engines/PdfLatexEngine.cpp
     src/tools/BibtexTool.cpp
     src/tools/HashTriggeredTool.cpp
@@ -76,7 +60,6 @@ target_include_directories(maketex_lib PUBLIC include)
 target_link_libraries(maketex_lib PUBLIC
     BLAKE3::blake3
     SQLiteCpp
-    Taskflow::Taskflow
 )
 
 target_compile_options(maketex_lib PRIVATE

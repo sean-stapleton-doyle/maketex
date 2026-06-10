@@ -7,11 +7,9 @@
 #include "Process.h"
 #include "StateDatabase.h"
 #include "ToolFactory.h"
-#include "ToolRunner.h"
 #include "engines/PdfLatexEngine.h"
 
 #include <SQLiteCpp/SQLiteCpp.h>
-#include <taskflow/taskflow.hpp>
 
 #include <filesystem>
 #include <iostream>
@@ -73,10 +71,7 @@ int main(int argc, char* argv[])
     maketex::StateDatabase stateDb(std::move(db));
 
     maketex::Blake3Hasher hasher;
-    tf::Executor executor(1);
-
-    maketex::PdfLatexEngine engine(executor);
-    maketex::ToolRunner toolRunner(executor);
+    maketex::PdfLatexEngine engine;
 
     maketex::ToolFactory factory(hasher);
     std::vector<std::unique_ptr<maketex::ITool>> tools;
@@ -106,7 +101,7 @@ int main(int argc, char* argv[])
     std::cout << "maketex: building " << texFile.filename().string() << "\n";
 
     maketex::BuildDriver driver(engine, stateDb, hasher, inv,
-        maketex::BuildDriver::kDefaultMaxPasses, std::move(toolPtrs), &toolRunner,
+        maketex::BuildDriver::kDefaultMaxPasses, std::move(toolPtrs),
         texSystemRoots());
     auto result = driver.run();
 

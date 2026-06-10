@@ -11,17 +11,13 @@
 #include "ToolContext.h"
 #include "ToolFactory.h"
 #include "ToolInvocation.h"
-#include "ToolRunner.h"
 
 #include "test_utils.h"
 
 #include <gtest/gtest.h>
 
-#include <taskflow/taskflow.hpp>
-
 #include <filesystem>
 #include <fstream>
-#include <future>
 #include <string>
 #include <vector>
 
@@ -40,7 +36,7 @@ namespace {
 
 // ── FakeTool ──────────────────────────────────────────────────────────────────
 
-// Minimal ITool fake. buildArgs returns `true` so ToolRunner launches a no-op
+// Minimal ITool fake. buildArgs returns `true` so the driver launches a no-op
 // process that exits 0; the test counts invocations via buildArgs.
 class FakeTool : public maketex::ITool {
 public:
@@ -80,7 +76,7 @@ public:
     {
     }
 
-    std::future<RunResult<EngineInvocation>> run(const EngineInvocation& inv) override
+    RunResult<EngineInvocation> run(const EngineInvocation& inv) override
     {
         if (m_index >= static_cast<int>(m_calls.size()))
             throw std::out_of_range("FakeEngine: no more calls configured");
@@ -90,20 +86,16 @@ public:
             fs::create_directories(path.parent_path());
             std::ofstream(path) << content;
         }
-        auto invPtr = std::make_shared<const EngineInvocation>(inv);
-        std::promise<RunResult<EngineInvocation>> p;
-        p.set_value(RunResult<EngineInvocation> {
-            .invocation = std::move(invPtr),
+        return RunResult<EngineInvocation> {
+            .invocation = inv,
             .kind = invokerKind(),
             .exitCode = call.exitCode,
             .stdoutOutput = call.stdoutOutput,
-        });
-        return p.get_future();
+        };
     }
 
     std::string_view name() const override { return "fake"; }
     maketex::InvokerKind invokerKind() const override { return InvokerKind::PdfLatex; }
-    bool handlesOwnLoop() const override { return false; }
 
     int callCount() const { return m_index; }
 
@@ -121,7 +113,6 @@ protected:
     fs::path m_dir;
     StateDatabase m_db { makeMemoryDb() };
     Blake3Hasher m_hasher;
-    tf::Executor m_executor { 1 };
 
     void SetUp() override
     {
@@ -468,14 +459,14 @@ TEST_F(BuildDriverTest, ignoredPrefixFilesAreNotTracked)
         },
     } });
     BuildDriver firstDriver(firstEngine, m_db, m_hasher, makeInv(),
-        BuildDriver::kDefaultMaxPasses, {}, nullptr, prefixes);
+        BuildDriver::kDefaultMaxPasses, {}, prefixes);
     ASSERT_TRUE(firstDriver.run().success);
 
     std::ofstream(texmf / "article.cls") << "% class v2, updated distro\n";
 
     FakeEngine secondEngine({});
     BuildDriver secondDriver(secondEngine, m_db, m_hasher, makeInv(),
-        BuildDriver::kDefaultMaxPasses, {}, nullptr, prefixes);
+        BuildDriver::kDefaultMaxPasses, {}, prefixes);
     auto res = secondDriver.run();
 
     EXPECT_TRUE(res.success);
@@ -499,7 +490,6 @@ TEST_F(BuildDriverTest, toolTriggerChangeDefeatsIncrementalSkip)
     };
 
     maketex::ToolFactory factory(m_hasher);
-    maketex::ToolRunner toolRunner(m_executor);
 
     // First session: engine writes the .bcf, tool fires, build converges and
     // records the tool's input hash.
@@ -510,7 +500,7 @@ TEST_F(BuildDriverTest, toolTriggerChangeDefeatsIncrementalSkip)
         auto biber = factory.hashTriggered(
             "biber", ".bcf", { "true" }, InvokerKind::Biber, /*runOnce=*/true);
         BuildDriver driver(engine, m_db, m_hasher, makeInv(),
-            BuildDriver::kDefaultMaxPasses, { biber.get() }, &toolRunner);
+            BuildDriver::kDefaultMaxPasses, { biber.get() });
         ASSERT_TRUE(driver.run().success);
     }
 
@@ -520,7 +510,7 @@ TEST_F(BuildDriverTest, toolTriggerChangeDefeatsIncrementalSkip)
         auto biber = factory.hashTriggered(
             "biber", ".bcf", { "true" }, InvokerKind::Biber, /*runOnce=*/true);
         BuildDriver driver(engine, m_db, m_hasher, makeInv(),
-            BuildDriver::kDefaultMaxPasses, { biber.get() }, &toolRunner);
+            BuildDriver::kDefaultMaxPasses, { biber.get() });
         auto res = driver.run();
         EXPECT_TRUE(res.success);
         EXPECT_EQ(res.passes, 0);
@@ -534,7 +524,7 @@ TEST_F(BuildDriverTest, toolTriggerChangeDefeatsIncrementalSkip)
         auto biber = factory.hashTriggered(
             "biber", ".bcf", { "true" }, InvokerKind::Biber, /*runOnce=*/true);
         BuildDriver driver(engine, m_db, m_hasher, makeInv(),
-            BuildDriver::kDefaultMaxPasses, { biber.get() }, &toolRunner);
+            BuildDriver::kDefaultMaxPasses, { biber.get() });
         auto res = driver.run();
         EXPECT_TRUE(res.success);
         EXPECT_GE(res.passes, 1);
@@ -567,10 +557,8 @@ TEST_F(BuildDriverTest, hashTriggeredToolFiresOnBcfChange)
     maketex::ToolFactory factory(m_hasher);
     auto biber = factory.hashTriggered(
         "biber", ".bcf", { "true" }, InvokerKind::Biber, /*runOnce=*/true);
-
-    maketex::ToolRunner toolRunner(m_executor);
     BuildDriver driver(engine, m_db, m_hasher, makeInv(),
-        BuildDriver::kDefaultMaxPasses, { biber.get() }, &toolRunner);
+        BuildDriver::kDefaultMaxPasses, { biber.get() });
     auto res = driver.run();
 
     EXPECT_TRUE(res.success);
@@ -601,9 +589,8 @@ TEST_F(BuildDriverTest, bibtexTriggeredByAuxBibdata)
     });
 
     FakeTool bibtexTool;
-    maketex::ToolRunner toolRunner(m_executor);
     BuildDriver driver(engine, m_db, m_hasher, makeInv(),
-        BuildDriver::kDefaultMaxPasses, { &bibtexTool }, &toolRunner);
+        BuildDriver::kDefaultMaxPasses, { &bibtexTool });
     auto res = driver.run();
 
     EXPECT_TRUE(res.success);

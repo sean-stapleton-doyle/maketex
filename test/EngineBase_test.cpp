@@ -1,7 +1,6 @@
 #include "EngineBase.h"
 #include "engines/PdfLatexEngine.h"
 
-#include <taskflow/taskflow.hpp>
 #include <gtest/gtest.h>
 
 #include <algorithm>
@@ -13,7 +12,6 @@ using namespace maketex;
 // Engine that runs /bin/echo so we can test run() without a LaTeX install.
 class EchoEngine final : public EngineBase {
 public:
-    using EngineBase::EngineBase;
     std::string_view name() const override { return "echo"; }
     InvokerKind invokerKind() const override { return InvokerKind::PdfLatex; }
     std::vector<std::string> buildArgs(const EngineInvocation& inv) const override
@@ -22,16 +20,13 @@ public:
     }
 };
 
-class EngineBaseTest : public ::testing::Test {
-protected:
-    tf::Executor m_executor { 1 };
-};
+class EngineBaseTest : public ::testing::Test { };
 
 // ── PdfLatexEngine::buildArgs ─────────────────────────────────────────────────
 
 TEST_F(EngineBaseTest, pdflatexFirstArgIsBinary)
 {
-    PdfLatexEngine engine(m_executor);
+    PdfLatexEngine engine;
     EngineInvocation inv;
     inv.texFile = "doc.tex";
     EXPECT_EQ(engine.buildArgs(inv).front(), "pdflatex");
@@ -39,7 +34,7 @@ TEST_F(EngineBaseTest, pdflatexFirstArgIsBinary)
 
 TEST_F(EngineBaseTest, pdflatexAlwaysAddsRecorder)
 {
-    PdfLatexEngine engine(m_executor);
+    PdfLatexEngine engine;
     EngineInvocation inv;
     inv.texFile = "doc.tex";
     inv.recorder = false; // buildArgs adds -recorder unconditionally
@@ -51,7 +46,7 @@ TEST_F(EngineBaseTest, pdflatexAlwaysNonstopmode)
 {
     // nonstopmode (not batchmode): errors appear on stdout so DiagnosticExtractor
     // can parse them from the captured output without reading the .log file.
-    PdfLatexEngine engine(m_executor);
+    PdfLatexEngine engine;
     EngineInvocation inv;
     inv.texFile = "doc.tex";
     auto args = engine.buildArgs(inv);
@@ -61,7 +56,7 @@ TEST_F(EngineBaseTest, pdflatexAlwaysNonstopmode)
 
 TEST_F(EngineBaseTest, pdflatexHaltOnErrorPresent)
 {
-    PdfLatexEngine engine(m_executor);
+    PdfLatexEngine engine;
     EngineInvocation inv;
     inv.texFile = "doc.tex";
     inv.haltOnError = true;
@@ -71,7 +66,7 @@ TEST_F(EngineBaseTest, pdflatexHaltOnErrorPresent)
 
 TEST_F(EngineBaseTest, pdflatexHaltOnErrorAbsent)
 {
-    PdfLatexEngine engine(m_executor);
+    PdfLatexEngine engine;
     EngineInvocation inv;
     inv.texFile = "doc.tex";
     inv.haltOnError = false;
@@ -81,7 +76,7 @@ TEST_F(EngineBaseTest, pdflatexHaltOnErrorAbsent)
 
 TEST_F(EngineBaseTest, pdflatexShellEscape)
 {
-    PdfLatexEngine engine(m_executor);
+    PdfLatexEngine engine;
     EngineInvocation inv;
     inv.texFile = "doc.tex";
     inv.shellEscape = true;
@@ -91,7 +86,7 @@ TEST_F(EngineBaseTest, pdflatexShellEscape)
 
 TEST_F(EngineBaseTest, pdflatexSynctex)
 {
-    PdfLatexEngine engine(m_executor);
+    PdfLatexEngine engine;
     EngineInvocation inv;
     inv.texFile = "doc.tex";
     inv.synctex = true;
@@ -101,7 +96,7 @@ TEST_F(EngineBaseTest, pdflatexSynctex)
 
 TEST_F(EngineBaseTest, pdflatexOutputDirectory)
 {
-    PdfLatexEngine engine(m_executor);
+    PdfLatexEngine engine;
     EngineInvocation inv;
     inv.texFile = "doc.tex";
     inv.outputDir = "/tmp/out";
@@ -111,7 +106,7 @@ TEST_F(EngineBaseTest, pdflatexOutputDirectory)
 
 TEST_F(EngineBaseTest, pdflatexJobName)
 {
-    PdfLatexEngine engine(m_executor);
+    PdfLatexEngine engine;
     EngineInvocation inv;
     inv.texFile = "doc.tex";
     inv.jobName = "mydoc";
@@ -121,7 +116,7 @@ TEST_F(EngineBaseTest, pdflatexJobName)
 
 TEST_F(EngineBaseTest, pdflatexTexFileIsLast)
 {
-    PdfLatexEngine engine(m_executor);
+    PdfLatexEngine engine;
     EngineInvocation inv;
     inv.texFile = "doc.tex";
     EXPECT_EQ(engine.buildArgs(inv).back(), "doc.tex");
@@ -129,7 +124,7 @@ TEST_F(EngineBaseTest, pdflatexTexFileIsLast)
 
 TEST_F(EngineBaseTest, pdflatexNoOutputDirByDefault)
 {
-    PdfLatexEngine engine(m_executor);
+    PdfLatexEngine engine;
     EngineInvocation inv;
     inv.texFile = "doc.tex";
     auto args = engine.buildArgs(inv);
@@ -142,11 +137,11 @@ TEST_F(EngineBaseTest, pdflatexNoOutputDirByDefault)
 
 TEST_F(EngineBaseTest, runReturnsZeroExitAndCapturesStdout)
 {
-    EchoEngine engine(m_executor);
+    EchoEngine engine;
     EngineInvocation inv;
     inv.texFile = "hello.tex";
 
-    auto result = engine.run(inv).get();
+    auto result = engine.run(inv);
 
     EXPECT_EQ(result.exitCode, 0);
     EXPECT_EQ(result.stdoutOutput, "hello.tex\n");
@@ -166,7 +161,7 @@ TEST_F(EngineBaseTest, runPropagatesNonZeroExit)
         }
     };
 
-    FalseEngine engine(m_executor);
-    auto result = engine.run(EngineInvocation {}).get();
+    FalseEngine engine;
+    auto result = engine.run(EngineInvocation {});
     EXPECT_EQ(result.exitCode, 1);
 }
