@@ -2,8 +2,8 @@
 
 #include "InvokerKind.h"
 
+#include <algorithm>
 #include <charconv>
-#include <deque>
 #include <filesystem>
 #include <optional>
 #include <sstream>
@@ -39,18 +39,24 @@ namespace {
         const std::string& output, const std::filesystem::path& texFile)
     {
         std::vector<Diagnostic> diags;
-        std::istringstream stream(output);
-        std::string line;
-
-        // Rolling context window shown in rawContext.
-        std::deque<std::string> window;
-        constexpr int kWindowSize = 8;
         std::string file = texFile.filename().string();
 
-        while (std::getline(stream, line)) {
-            window.push_back(line);
-            if ((int)window.size() > kWindowSize)
-                window.pop_front();
+        // Index-based scan over all lines: the look-ahead for `l.N` must not
+        // consume lines, or an error inside the look-ahead window would be
+        // silently dropped.
+        std::vector<std::string> lines;
+        {
+            std::istringstream stream(output);
+            std::string line;
+            while (std::getline(stream, line))
+                lines.push_back(std::move(line));
+        }
+
+        constexpr size_t kContextBefore = 7;
+        constexpr size_t kLookAhead = 8;
+
+        for (size_t i = 0; i < lines.size(); ++i) {
+            const auto& line = lines[i];
 
             // Skip non-error lines and the "!  ==>" fatal-error summary line
             // (two spaces after '!' marks a continuation, not a new error).
@@ -60,20 +66,21 @@ namespace {
             std::string message = line.substr(2);
             int lineNum = -1;
 
-            // Assemble rawContext from the window plus a few lines ahead.
+            // rawContext: up to kContextBefore lines of history plus the
+            // look-ahead up to the `l.N` line (or the next error).
             std::string rawCtx;
-            for (const auto& w : window)
-                rawCtx += w + "\n";
+            for (size_t j = i - std::min(i, kContextBefore); j <= i; ++j)
+                rawCtx += lines[j] + "\n";
 
-            // Scan ahead for the `l.N` line that carries the source line number.
-            std::string ahead;
-            for (int i = 0; i < 8 && std::getline(stream, ahead); ++i) {
-                rawCtx += ahead + "\n";
-                if (ahead.starts_with("l.")) {
-                    auto space = ahead.find(' ');
-                    auto numStr = ahead.substr(2, space == std::string::npos
-                            ? std::string::npos
-                            : space - 2);
+            for (size_t j = i + 1; j < lines.size() && j <= i + kLookAhead; ++j) {
+                if (lines[j].starts_with("! "))
+                    break; // next error owns its own context
+                rawCtx += lines[j] + "\n";
+                if (lines[j].starts_with("l.")) {
+                    auto space = lines[j].find(' ');
+                    auto numStr = std::string_view(lines[j]).substr(2,
+                        space == std::string::npos ? std::string_view::npos
+                                                   : space - 2);
                     if (auto n = tryParseInt(numStr); n.has_value())
                         lineNum = n.value();
                     break;
@@ -90,7 +97,7 @@ namespace {
 
             diags.push_back(Diagnostic {
                 .severity = Diagnostic::Severity::Error,
-                .file = std::move(file),
+                .file = file,
                 .line = lineNum,
                 .message = std::move(message),
                 .rawContext = std::move(rawCtx),
@@ -165,8 +172,9 @@ namespace {
                     auto end = start;
                     while (end < line.size() && std::isdigit((unsigned char)line[end]))
                         ++end;
-                    try { lineNum = std::stoi(line.substr(start, end - start)); }
-                    catch (...) {}
+                    lineNum = tryParseInt(
+                        std::string_view(line).substr(start, end - start))
+                                  .value_or(-1);
                 }
 
                 diags.push_back(Diagnostic {
@@ -223,127 +231,80 @@ namespace {
         return diags;
     }
 
-    // ── biber ─────────────────────────────────────────────────────────────────
+    // ── pattern-driven tool extractors ────────────────────────────────────────
+    // biber, makeindex, makeglossaries, and pythontex all report diagnostics
+    // as single lines recognisable by a marker token. One scan loop, one
+    // pattern table per tool.
+
+    struct LinePattern {
+        std::string_view token;
+        bool prefixMatch; // starts_with vs. contains
+        Diagnostic::Severity severity;
+        bool messageAfterToken; // message = rest of line after token, else whole line
+    };
+
+    std::vector<Diagnostic> extractByLinePatterns(const std::string& output,
+        std::initializer_list<LinePattern> patterns)
+    {
+        std::vector<Diagnostic> diags;
+        std::istringstream stream(output);
+        std::string line;
+
+        while (std::getline(stream, line)) {
+            for (const auto& p : patterns) {
+                auto pos = p.prefixMatch
+                    ? (line.starts_with(p.token) ? size_t { 0 } : std::string::npos)
+                    : line.find(p.token);
+                if (pos == std::string::npos)
+                    continue;
+                diags.push_back(Diagnostic {
+                    .severity = p.severity,
+                    .message = p.messageAfterToken
+                        ? line.substr(pos + p.token.size())
+                        : line,
+                    .rawContext = line,
+                });
+                break; // first matching pattern wins
+            }
+        }
+
+        return diags;
+    }
+
+    constexpr auto kError = Diagnostic::Severity::Error;
+    constexpr auto kWarning = Diagnostic::Severity::Warning;
 
     std::vector<Diagnostic> extractBiber(const std::string& output)
     {
-        std::vector<Diagnostic> diags;
-        std::istringstream stream(output);
-        std::string line;
-
-        while (std::getline(stream, line)) {
-            Diagnostic::Severity sev;
-            std::string_view prefix;
-
-            if (line.find("ERROR - ") != std::string::npos) {
-                sev = Diagnostic::Severity::Error;
-                prefix = "ERROR - ";
-            } else if (line.find("WARN - ") != std::string::npos) {
-                sev = Diagnostic::Severity::Warning;
-                prefix = "WARN - ";
-            } else {
-                continue;
-            }
-
-            auto pos = line.find(prefix);
-            std::string message = (pos != std::string::npos)
-                ? line.substr(pos + prefix.size())
-                : line;
-
-            diags.push_back(Diagnostic {
-                .severity = sev,
-                .message = std::move(message),
-                .rawContext = line,
-            });
-        }
-
-        return diags;
+        return extractByLinePatterns(output,
+            { { "ERROR - ", false, kError, true },
+                { "WARN - ", false, kWarning, true } });
     }
 
-    // ── makeindex ─────────────────────────────────────────────────────────────
     // makeindex writes errors prefixed with "!! " and warnings prefixed with "## ".
-
     std::vector<Diagnostic> extractMakeindex(const std::string& output)
     {
-        std::vector<Diagnostic> diags;
-        std::istringstream stream(output);
-        std::string line;
-
-        while (std::getline(stream, line)) {
-            if (line.starts_with("!! ")) {
-                diags.push_back(Diagnostic {
-                    .severity = Diagnostic::Severity::Error,
-                    .message = line.substr(3),
-                    .rawContext = line,
-                });
-            } else if (line.starts_with("## ")) {
-                diags.push_back(Diagnostic {
-                    .severity = Diagnostic::Severity::Warning,
-                    .message = line.substr(3),
-                    .rawContext = line,
-                });
-            }
-        }
-
-        return diags;
+        return extractByLinePatterns(output,
+            { { "!! ", true, kError, true },
+                { "## ", true, kWarning, true } });
     }
 
-    // ── makeglossaries ────────────────────────────────────────────────────────
     // makeglossaries is a Perl script that delegates to makeindex/xindy.
     // Errors are reported as lines containing "Error" (fatal) or "Warning".
-
     std::vector<Diagnostic> extractMakeglossaries(const std::string& output)
     {
-        std::vector<Diagnostic> diags;
-        std::istringstream stream(output);
-        std::string line;
-
-        while (std::getline(stream, line)) {
-            if (line.find("Error") != std::string::npos) {
-                diags.push_back(Diagnostic {
-                    .severity = Diagnostic::Severity::Error,
-                    .message = line,
-                    .rawContext = line,
-                });
-            } else if (line.find("Warning") != std::string::npos) {
-                diags.push_back(Diagnostic {
-                    .severity = Diagnostic::Severity::Warning,
-                    .message = line,
-                    .rawContext = line,
-                });
-            }
-        }
-
-        return diags;
+        return extractByLinePatterns(output,
+            { { "Error", false, kError, false },
+                { "Warning", false, kWarning, false } });
     }
 
-    // ── pythontex ─────────────────────────────────────────────────────────────
     // pythontex reports structured messages as "PythonTeX error" / "PythonTeX
     // warning" lines, followed by detail lines indented with spaces.
-
     std::vector<Diagnostic> extractPythontex(const std::string& output)
     {
-        std::vector<Diagnostic> diags;
-        std::istringstream stream(output);
-        std::string line;
-
-        while (std::getline(stream, line)) {
-            if (line.find("PythonTeX error") != std::string::npos) {
-                diags.push_back(Diagnostic {
-                    .severity = Diagnostic::Severity::Error,
-                    .message = line,
-                    .rawContext = line,
-                });
-            } else if (line.find("PythonTeX warning") != std::string::npos) {
-                diags.push_back(Diagnostic {
-                    .severity = Diagnostic::Severity::Warning,
-                    .message = line,
-                    .rawContext = line,
-                });
-            }
-        }
-
-        return diags;
+        return extractByLinePatterns(output,
+            { { "PythonTeX error", false, kError, false },
+                { "PythonTeX warning", false, kWarning, false } });
     }
 
     // ── fallback ──────────────────────────────────────────────────────────────
@@ -352,7 +313,7 @@ namespace {
     {
         return Diagnostic {
             .severity = Diagnostic::Severity::Error,
-            .message = "build failed \xe2\x80\x94 run with --verbose to see full engine output",
+            .message = "build failed — run with --verbose to see full engine output",
             .rawContext = stdout,
         };
     }

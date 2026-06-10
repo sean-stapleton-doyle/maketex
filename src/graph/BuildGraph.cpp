@@ -6,14 +6,15 @@ namespace fs = std::filesystem;
 
 FileNode& BuildGraph::getOrAddFile(fs::path path, FileRole role)
 {
-    auto key = fs::weakly_canonical(path).string();
+    auto canonical = fs::weakly_canonical(path);
+    auto key = canonical.string();
     auto it = m_files.find(key);
     if (it != m_files.end())
         return *it->second;
 
-    auto node = std::make_unique<FileNode>(fs::weakly_canonical(path), role);
+    auto node = std::make_unique<FileNode>(std::move(canonical), role);
     auto& ref = *node;
-    m_files.emplace(key, std::move(node));
+    m_files.emplace(std::move(key), std::move(node));
     return ref;
 }
 

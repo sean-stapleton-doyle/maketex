@@ -148,6 +148,15 @@ ProcessResult Process::wait()
     std::string* bufs[2] = { &result.stdoutOutput, &result.stderrOutput };
     int open = 2;
 
+    // Closes one pipe end and mirrors the change into the member fd, so the
+    // destructor never double-closes if poll/read throws mid-drain.
+    auto closeEnd = [&](int i) {
+        ::close(fds[i].fd);
+        fds[i].fd = -1;
+        (i == 0 ? m_stdoutFd : m_stderrFd) = -1;
+        --open;
+    };
+
     std::array<char, 65536> buf;
 
     while (open > 0) {
@@ -166,20 +175,13 @@ ProcessResult Process::wait()
                     bufs[i]->append(buf.data(), static_cast<size_t>(r));
                 } else {
                     // r == 0: EOF. r < 0 after POLLIN is unexpected; close anyway.
-                    ::close(fds[i].fd);
-                    fds[i].fd = -1;
-                    --open;
+                    closeEnd(i);
                 }
             } else if (fds[i].revents & (POLLERR | POLLNVAL)) {
-                ::close(fds[i].fd);
-                fds[i].fd = -1;
-                --open;
+                closeEnd(i);
             }
         }
     }
-
-    m_stdoutFd = -1;
-    m_stderrFd = -1;
 
     int status = 0;
     while (::waitpid(m_pid, &status, 0) < 0) {
