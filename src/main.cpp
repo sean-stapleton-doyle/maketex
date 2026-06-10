@@ -44,20 +44,35 @@ static std::vector<fs::path> texSystemRoots()
     return roots;
 }
 
-int main(int argc, char* argv[])
+static constexpr std::string_view kUsage = "Usage: maketex [-v|--verbose] <file.tex>\n";
+
+static int run(int argc, char* argv[])
 {
-    if (argc < 2) {
-        std::cerr << "Usage: maketex <file.tex>\n";
+    bool verbose = false;
+    fs::path texFile;
+
+    for (int i = 1; i < argc; ++i) {
+        std::string_view arg(argv[i]);
+        if (arg == "--verbose" || arg == "-v") {
+            verbose = true;
+        } else if (arg == "--help" || arg == "-h") {
+            std::cout << kUsage;
+            return 0;
+        } else if (arg.starts_with("-")) {
+            std::cerr << "maketex: unknown option: " << arg << "\n" << kUsage;
+            return 1;
+        } else if (texFile.empty()) {
+            texFile = fs::absolute(arg);
+        } else {
+            std::cerr << "maketex: multiple input files given\n" << kUsage;
+            return 1;
+        }
+    }
+
+    if (texFile.empty()) {
+        std::cerr << kUsage;
         return 1;
     }
-
-    bool verbose = false;
-    for (int i = 1; i < argc; ++i) {
-        if (std::string_view(argv[i]) == "--verbose" || std::string_view(argv[i]) == "-v")
-            verbose = true;
-    }
-
-    fs::path texFile = fs::absolute(argv[1]);
     if (!fs::exists(texFile)) {
         std::cerr << "maketex: file not found: " << texFile << "\n";
         return 1;
@@ -116,4 +131,15 @@ int main(int argc, char* argv[])
     maketex::diagnostics::format(result.diagnostics, std::cerr, verbose);
 
     return 1;
+}
+
+int main(int argc, char* argv[])
+{
+    try {
+        return run(argc, argv);
+    } catch (const std::exception& e) {
+        // Spawn failures (latex not installed), database errors, etc.
+        std::cerr << "maketex: " << e.what() << "\n";
+        return 1;
+    }
 }
