@@ -1,0 +1,39 @@
+% Fixture: makeindex
+%
+% Purpose: verify the makeindex workflow for index generation.
+%
+% Expected maketex behaviour:
+%   - Engine: pdflatex
+%   - Passes: 2  (latex → makeindex → latex)
+%   - Aux tools: makeindex
+%   - Output: main.pdf
+%
+% Pass 1: latex writes raw index entries to main.idx
+% makeindex: reads main.idx, writes main.ind + main.ilg
+% Pass 2: latex reads main.ind and typesets the index; converges
+
+\documentclass{article}
+\usepackage{makeidx}
+\makeindex
+
+\title{Makeindex Test}
+\author{Test Fixture}
+\date{2026-06-07}
+
+\begin{document}
+
+\maketitle
+
+\section{Introduction}
+This document tests that \texttt{maketex} correctly orchestrates the
+makeindex workflow. \index{LaTeX} was created by Leslie Lamport
+\index{Lamport, Leslie} as a macro system on top of \TeX.
+\index{TeX} Donald Knuth \index{Knuth, Donald E.} created \TeX{} in 1978.
+
+\section{Background}
+The \texttt{makeidx} \index{makeidx} package provides the
+\verb|\index| \index{index command} command for marking index entries.
+
+\printindex
+
+\end{document}

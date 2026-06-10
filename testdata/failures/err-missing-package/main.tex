@@ -1,0 +1,29 @@
+% Fixture: failures/err-missing-package
+%
+% Purpose: verify that a missing package is reported correctly.
+%
+% Expected maketex behaviour:
+%   - Engine: pdflatex -halt-on-error
+%   - Exit: 1 (fatal error)
+%   - No PDF produced
+%
+% Log error (exact text):
+%   ! LaTeX Error: File `no-such-package-maketex-test.sty' not found.
+%
+% The error surfacing system should extract:
+%   - type:    error
+%   - file:    main.tex
+%   - line:    10  (the \usepackage line)
+%   - message: File `no-such-package-maketex-test.sty' not found.
+%
+% The package name is deliberately long and unique so it can never collide
+% with a real package that might be installed in the test environment.
+
+\documentclass{article}
+\usepackage{no-such-package-maketex-test}
+
+\begin{document}
+
+This document will never be typeset because the package above does not exist.
+
+\end{document}

@@ -1,0 +1,50 @@
+% Fixture: glossaries
+%
+% Purpose: verify the makeglossaries workflow for glossary and acronym expansion.
+%
+% Expected maketex behaviour:
+%   - Engine: pdflatex
+%   - Passes: 2  (latex → makeglossaries → latex)
+%   - Aux tools: makeglossaries
+%   - Output: main.pdf
+%
+% Pass 1: latex writes raw glossary entries to main.glo and acronym entries to
+%         main.acn via the glossaries package
+% makeglossaries: runs xindy/makeindex on both files, producing main.gls + main.acr
+% Pass 2: latex reads main.gls and main.acr, typesets the glossary; converges
+
+\documentclass{article}
+\usepackage[acronym, toc]{glossaries}
+
+\makeglossaries
+
+\newglossaryentry{latex}{
+  name={\LaTeX},
+  description={A document preparation system based on \TeX}
+}
+
+\newglossaryentry{tex}{
+  name={\TeX},
+  description={A typesetting system created by Donald Knuth}
+}
+
+\newacronym{pdf}{PDF}{Portable Document Format}
+\newacronym{toc}{ToC}{Table of Contents}
+
+\title{Glossaries Test}
+\author{Test Fixture}
+\date{2026-06-07}
+
+\begin{document}
+
+\maketitle
+
+\section{Introduction}
+This document tests that \texttt{maketex} correctly orchestrates the
+\texttt{makeglossaries} workflow. \Gls{latex} is built on top of \gls{tex}.
+Output is produced as a \gls{pdf} \gls{pdf} file. The document also has a
+\gls{toc}.
+
+\printglossaries
+
+\end{document}

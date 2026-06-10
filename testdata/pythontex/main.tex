@@ -1,0 +1,48 @@
+% Fixture: pythontex
+%
+% Purpose: verify the pythontex workflow (2-pass + pythontex tool run).
+%
+% Expected maketex behaviour:
+%   - Engine: pdflatex -shell-escape
+%   - Passes: 2  (latex → pythontex → latex)
+%   - Aux tools: pythontex (run between passes)
+%   - Output: main.pdf
+%
+% Pass 1: latex writes Python code blocks to pythontex-files-main/
+%         and a .pytxcode file; it also sets a rerun flag because pythontex
+%         output is not yet available.
+% pythontex: executes the Python code, writes output to pythontex-files-main/
+% Pass 2: latex reads the pythontex output and typesets it; converges.
+%
+% Requires: pythontex installed (pip install pythontex or tlmgr install pythontex)
+%           -shell-escape flag (or run pythontex separately between passes)
+%
+% Note: pythontex is NOT compatible with TikZ externalize; do not combine them.
+
+\documentclass{article}
+\usepackage{pythontex}
+
+\title{PythonTeX Integration Test}
+\author{Test Fixture}
+\date{2026-06-07}
+
+\begin{document}
+
+\maketitle
+
+\section{Inline Python computation}
+
+The following values are computed by Python at build time:
+
+\begin{pycode}
+import math
+primes = [n for n in range(2, 50) if all(n % i != 0 for i in range(2, n))]
+print(r'\textbf{Primes below 50:} ' + ', '.join(map(str, primes)) + '.')
+print(r'The golden ratio $\varphi \approx ' + f'{(1 + math.sqrt(5)) / 2:.6f}' + r'$.')
+\end{pycode}
+
+\section{Inline expression}
+
+$e \approx \py{round(math.e, 8)}$
+
+\end{document}

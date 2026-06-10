@@ -1,0 +1,33 @@
+% Fixture: failures/warn-undefined-refs
+%
+% Purpose: verify that undefined references produce warnings, not a hard error.
+%
+% Expected maketex behaviour:
+%   - Engine: pdflatex
+%   - Exit: 0 (success — LaTeX does not treat this as fatal)
+%   - PDF produced (with "??" placeholders for unresolved references)
+%
+% Log warnings (exact text):
+%   LaTeX Warning: Reference `no-such-label' on page 1 undefined on input line 8.
+%   LaTeX Warning: Reference `also-missing' on page 1 undefined on input line 9.
+%   LaTeX Warning: There were undefined references.
+%
+% The error surfacing system should:
+%   - classify these as warnings (severity < error)
+%   - extract file, line, and the reference key from each warning line
+%   - surface them to the user even though the build "succeeded"
+%
+% Optionally, a strict mode flag (analogous to latexmk's $bad_warning_is_error)
+% should allow promoting undefined references to a build failure.
+
+\documentclass{article}
+
+\begin{document}
+
+\section{Introduction}
+
+This document refers to Section~\ref{no-such-label} and
+Figure~\ref{also-missing}, neither of which exists.
+The PDF is produced with \texttt{??} placeholders but the build exits 0.
+
+\end{document}

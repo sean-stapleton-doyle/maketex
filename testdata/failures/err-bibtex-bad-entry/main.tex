@@ -1,0 +1,35 @@
+% Fixture: failures/err-bibtex-bad-entry
+%
+% Purpose: verify that a malformed .bib entry causes bibtex to report errors.
+%
+% Expected maketex behaviour:
+%   - Engine: pdflatex (first pass produces main.aux)
+%   - bibtex invoked; reads bad.bib and encounters a parse error
+%   - Exit: 2 (bibtex fatal error due to malformed entry)
+%   - No PDF produced
+%
+% bibtex error output (approximate — exact messages vary by entry type):
+%   Repeated entry---line N of file bad.bib
+%   (There was 1 error message)
+%
+% Or for an unclosed brace:
+%   Warning--I'm ignoring this entire entry
+%   (There was 1 error message)
+%
+% The error surfacing system should:
+%   - detect bibtex exit code == 2 as a fatal build error
+%   - extract the error location (file + line) from bibtex output
+%   - surface the malformed entry to the user
+
+\documentclass{article}
+
+\begin{document}
+
+\section{Introduction}
+
+This document cites~\cite{jones2024} from a .bib file that has a syntax error.
+
+\bibliography{bad}
+\bibliographystyle{plain}
+
+\end{document}

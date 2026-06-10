@@ -1,0 +1,35 @@
+% Fixture: failures/err-runaway-argument
+%
+% Purpose: verify that an unclosed brace (runaway argument) is reported.
+%
+% Expected maketex behaviour:
+%   - Engine: pdflatex -halt-on-error
+%   - Exit: 1 (fatal error)
+%   - No PDF produced
+%
+% Log error (exact text):
+%   ! File ended while scanning use of \textbf .
+%   <inserted text>
+%                   \par
+%   <*> main.tex
+%
+% This error is harder to localise than a simple undefined command because
+% TeX only discovers the unclosed brace at end-of-file; the error surfacing
+% system must walk back from the EOF marker to report the opening brace site.
+%
+% The error surfacing system should extract:
+%   - type:    error
+%   - message: File ended while scanning use of \textbf
+%
+% Note: TeX does not report the original line number of the unclosed brace
+% in batchmode — it reports end-of-file. This is a known limitation.
+
+\documentclass{article}
+
+\begin{document}
+
+This is valid content.
+
+\textbf{This opening brace is never closed — TeX will run off the end of the file.
+
+\end{document}

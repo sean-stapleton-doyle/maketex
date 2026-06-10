@@ -1,0 +1,35 @@
+% Fixture: bibtex
+%
+% Purpose: verify the classic BibTeX bibliography workflow (3-pass build).
+%
+% Expected maketex behaviour:
+%   - Engine: pdflatex
+%   - Passes: 3  (latex → bibtex → latex → latex)
+%   - Aux tools: bibtex
+%   - Output: main.pdf
+%
+% Pass 1: latex writes \citation and \bibdata records to main.aux
+% bibtex: reads main.aux + refs.bib, writes main.bbl + main.blg
+% Pass 2: latex \inputs main.bbl; in-text \cites resolve
+% Pass 3: latex converges (citation labels correct, no rerun warnings)
+
+\documentclass{article}
+
+\title{BibTeX Integration Test}
+\author{Test Fixture}
+\date{2026-06-07}
+
+\begin{document}
+
+\maketitle
+
+\section{Introduction}
+
+This document tests that \texttt{maketex} correctly orchestrates the classic
+BibTeX workflow. Knuth introduced literate programming in~\cite{knuth1984literate},
+and the \LaTeX{} system is documented by Lamport~\cite{lamport1994latex}.
+
+\bibliographystyle{plain}
+\bibliography{refs}
+
+\end{document}

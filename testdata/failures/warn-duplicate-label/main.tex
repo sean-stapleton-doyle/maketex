@@ -1,0 +1,39 @@
+% Fixture: failures/warn-duplicate-label
+%
+% Purpose: verify that multiply-defined labels produce warnings.
+%
+% Expected maketex behaviour:
+%   - Engine: pdflatex
+%   - Passes: 2 (first pass triggers "Label(s) may have changed. Rerun…")
+%   - Exit: 0 (success — LaTeX does not treat this as fatal)
+%   - PDF produced (second reference wins; output is unpredictable)
+%
+% Log warnings (after second pass, exact text):
+%   LaTeX Warning: Label `sec:duplicate' multiply defined.
+%   LaTeX Warning: There were multiply-defined labels.
+%
+% The error surfacing system should:
+%   - classify these as warnings
+%   - extract the label key "sec:duplicate" from the message
+%   - surface them after the build completes
+%
+% Note: the first pass emits "Label(s) may have changed. Rerun to get
+% cross-references right." which drives the second pass; the multiply-defined
+% warning only appears on the second pass.
+
+\documentclass{article}
+
+\begin{document}
+
+\section{First Section}
+\label{sec:duplicate}
+
+This is the first section with label \texttt{sec:duplicate}.
+
+\section{Second Section}
+\label{sec:duplicate}
+
+This section accidentally reuses the same label.
+The cross-reference \ref{sec:duplicate} is now ambiguous.
+
+\end{document}

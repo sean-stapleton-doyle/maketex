@@ -1,0 +1,30 @@
+% Fixture: failures/err-unclosed-environment
+%
+% Purpose: verify that a \begin without a matching \end is reported.
+%
+% Expected maketex behaviour:
+%   - Engine: pdflatex -halt-on-error
+%   - Exit: 1 (fatal error)
+%   - No PDF produced
+%
+% Log error (exact text):
+%   ! LaTeX Error: \begin{center} on input line 20 ended by \end{document}.
+%
+% The error surfacing system should extract:
+%   - type:    error
+%   - file:    main.tex
+%   - line:    20  (the \begin{center} line)
+%   - message: \begin{center} on input line 20 ended by \end{document}.
+%
+% This error format is distinct: LaTeX embeds the opening line number inside
+% the message string itself. The parser must handle this double-encoding.
+
+\documentclass{article}
+
+\begin{document}
+
+\begin{center}
+This center environment is opened but never closed.
+The document ends while LaTeX is still inside it.
+
+\end{document}

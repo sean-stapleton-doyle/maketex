@@ -1,0 +1,99 @@
+#pragma once
+
+#include "Diagnostic.h"
+#include "EngineInvocation.h"
+#include "IEngine.h"
+#include "RunResult.h"
+#include "StateDatabase.h"
+#include "ToolInvocation.h"
+#include "graph/BuildGraph.h"
+
+#include <filesystem>
+#include <optional>
+#include <string>
+#include <unordered_map>
+#include <vector>
+
+namespace maketex {
+
+class Blake3Hasher;
+class FileStateTracker;
+class ITool;
+class RuleNode;
+class ToolContext;
+class ToolRunner;
+
+// Result of a complete BuildDriver run.
+struct DriverResult {
+    bool success = false;
+    int passes = 0;                        // how many latex passes were run
+    std::string lastError;                 // set on failure
+    std::vector<Diagnostic> diagnostics;   // extracted from engine/tool output
+};
+
+// Drives the full multi-pass latex compilation loop.
+//
+// Algorithm:
+//   1. Run latex with -recorder to produce a .fls file.
+//   2. Parse .fls → update BuildGraph (inputs/outputs).
+//   3. Snapshot hashes of all Generated files.
+//   4. Run any auxiliary tools whose inputs have changed.
+//   5. Re-run latex.
+//   6. Repeat until no Generated file changed between passes (convergence)
+//      or maxPasses is reached.
+class BuildDriver {
+public:
+    static constexpr int kDefaultMaxPasses = 8;
+
+    // engine, db, hasher, and toolRunner are non-owning — caller must ensure
+    // they outlive the driver. toolRunner may be null only when tools is empty.
+    BuildDriver(IEngine& engine,
+        StateDatabase& db,
+        Blake3Hasher& hasher,
+        EngineInvocation inv,
+        int maxPasses = kDefaultMaxPasses,
+        std::vector<ITool*> tools = {},
+        ToolRunner* toolRunner = nullptr);
+
+    DriverResult run();
+
+private:
+    // Outcome of one pass through m_tools.
+    struct ToolPassOutcome {
+        bool filesChanged = false;
+        std::optional<RunResult<ToolInvocation>> failure;
+        std::string failedToolName;
+    };
+
+    // Parse .fls and wire up FileNode/RuleNode edges in m_graph.
+    void updateGraphFromFls(const std::filesystem::path& flsPath,
+        const std::filesystem::path& pwd);
+
+    // Returns the current hash of every Generated FileNode that exists on disk.
+    std::unordered_map<std::string, Hash> takeSnapshot(FileStateTracker& tracker);
+
+    // Pre-loop incremental check. Returns true if a prior .fls exists, every
+    // recorded rule input still matches its stored hash, and the engine pass
+    // can be skipped entirely. Falls through (returns false) on first build.
+    bool tryIncrementalSkip(FileStateTracker& tracker);
+
+    // Post-pass bookkeeping for a successful engine run: parse the new .fls,
+    // refresh rule inputs from disk, and persist input hashes via markRan(true).
+    void persistEnginePass(FileStateTracker& tracker, RuleNode& latexRule);
+
+    // Iterates m_tools, running any that decide() Run via m_toolRunner.
+    // Stops at the first failure; reports it via outcome.failure.
+    ToolPassOutcome runAuxiliaryTools(ToolContext& ctx);
+
+    IEngine& m_engine;
+    StateDatabase& m_db;
+    Blake3Hasher& m_hasher;
+    EngineInvocation m_inv;
+    int m_maxPasses;
+    std::vector<ITool*> m_tools;
+    ToolRunner* m_toolRunner;
+
+    BuildGraph m_graph;
+};
+
+} // namespace maketex

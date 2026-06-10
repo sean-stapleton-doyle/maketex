@@ -1,0 +1,39 @@
+# Build tree
+build/
+.cache/
+compile_commands.json
+
+# maketex state databases
+.maketex.db
+
+# LaTeX build artifacts (testdata cases are rebuilt by integration runs)
+*.aux
+*.fls
+*.bbl
+*.blg
+*.bcf
+*.idx
+*.ilg
+*.ind
+*.glo
+*.gls
+*.glg
+*.alg
+*.acn
+*.acr
+*.toc
+*.lof
+*.lot
+*.out
+*.synctex.gz
+*.run.xml
+*.pytxcode
+*.pytxmcr
+*.pytxpyg
+pythontex-files-*/
+testdata/**/*.log
+testdata/**/*.pdf
+testdata/**/*.stdout
+
+# macOS
+.DS_Store

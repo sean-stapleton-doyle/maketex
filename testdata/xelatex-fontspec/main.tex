@@ -1,0 +1,38 @@
+% Fixture: xelatex-fontspec
+%
+% Purpose: verify XeLaTeX engine selection and fontspec usage.
+%
+% Expected maketex behaviour:
+%   - Engine: xelatex (NOT pdflatex)
+%   - Passes: 1
+%   - Aux tools: none
+%   - Output: main.pdf  (via .xdv → xdvipdfmx pipeline)
+%
+% XeLaTeX produces an intermediate .xdv (extended DVI) file before converting
+% to PDF via xdvipdfmx.  The driver must invoke xelatex (not pdflatex) and
+% handle the two-stage pipeline.
+%
+% fontspec allows loading system OpenType/TrueType fonts by name, which is the
+% primary reason to use XeLaTeX over pdflatex.
+
+\documentclass{article}
+\usepackage{fontspec}
+
+% Use a universally available font to keep the fixture portable.
+% Latin Modern is part of every TeX Live installation.
+\setmainfont{Latin Modern Roman}
+
+\title{XeLaTeX Fontspec Test}
+\author{Test Fixture}
+\date{2026-06-07}
+
+\begin{document}
+
+\maketitle
+
+\section{Introduction}
+This document is compiled with \texttt{xelatex} and uses the
+\texttt{fontspec} package to load a system OpenType font.
+A single pass should suffice --- no cross-references or bibliography.
+
+\end{document}

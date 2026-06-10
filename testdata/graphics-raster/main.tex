@@ -1,0 +1,42 @@
+% Fixture: graphics-raster
+%
+% Purpose: verify that PNG and JPEG image files are tracked as source dependencies.
+%
+% Expected maketex behaviour:
+%   - Engine: pdflatex
+%   - Passes: 1 (no cross-references, bibliography, or ToC)
+%   - Aux tools: none
+%   - Output: main.pdf
+%
+% pdflatex natively handles PNG and JPEG (no epstopdf needed).  Both image
+% files appear as INPUT records in main.fls and are tracked as Source
+% FileNodes.  If either image changes the document must be rebuilt.
+
+\documentclass{article}
+\usepackage{graphicx}
+
+\title{Raster Graphics Test}
+\author{Test Fixture}
+\date{2026-06-07}
+
+\begin{document}
+
+\maketitle
+
+\section{PNG image}
+
+\begin{figure}[h]
+  \centering
+  \includegraphics[width=4cm]{sample}
+  \caption{A 64$\times$64 cornflower-blue PNG.}
+\end{figure}
+
+\section{JPEG image}
+
+\begin{figure}[h]
+  \centering
+  \includegraphics[width=4cm]{photo}
+  \caption{A minimal 1$\times$1 grey JPEG.}
+\end{figure}
+
+\end{document}

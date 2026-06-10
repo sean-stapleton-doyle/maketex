@@ -1,0 +1,26 @@
+%!PS-Adobe-3.0 EPSF-3.0
+%%BoundingBox: 0 0 144 108
+%%Creator: maketex test fixture
+%%CreationDate: Thu Jan  1 00:00:00 2026
+%%Title: Test EPS Figure
+%%EndComments
+
+% A simple 144x108pt rectangle with a diagonal cross, drawn in grey.
+0.7 setgray
+0 0 144 108 rectfill
+
+0 setgray
+2 setlinewidth
+
+% Border
+0 0 moveto
+144 0 lineto
+144 108 lineto
+0 108 lineto
+closepath stroke
+
+% Diagonal lines
+0 0 moveto 144 108 lineto stroke
+144 0 moveto 0 108 lineto stroke
+
+%%EOF

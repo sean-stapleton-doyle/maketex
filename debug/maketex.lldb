@@ -1,0 +1,58 @@
+# maketex.lldb — LLDB session script
+#
+# Usage (bibtex fixture):
+#   lldb -s debug/maketex.lldb -- ./build/maketex testdata/bibtex/main.tex
+#
+# Usage (any fixture):
+#   lldb -- ./build/maketex testdata/<fixture>/main.tex
+#   (lldb) command source debug/maketex.lldb
+#
+# What this sets up
+# -----------------
+# BP 1  Hash comparison    BuildDriver.cpp:157
+#        Fires after every latex pass. Prints both snapshots so you can see
+#        exactly which Generated files changed between passes.
+#
+# BP 2  Graph update entry  BuildDriver.cpp:68 (updateGraphFromFls)
+#        Fires each time a .fls is parsed. Good place to step through
+#        the FlsParser → BuildGraph wiring.
+#
+# BP 3  New FileNode        BuildGraph.cpp:17
+#        Fires only when a brand-new node is added (not on cache hits).
+#        TeX system files are skipped silently; project files pause.
+#
+# BP 4  New RuleNode        BuildGraph.cpp:29
+#        Fires when a new rule ("pdflatex", "bibtex", …) is created.
+#
+# BP 5  Engine result       BuildDriver.cpp:140
+#        Fires immediately after future.get() returns. Prints exit code
+#        and output lengths for the just-completed latex/engine pass.
+
+# ── Load Python callbacks ─────────────────────────────────────────────────────
+command script import debug/maketex_callbacks.py
+
+# ── BP 1: Hash comparison ─────────────────────────────────────────────────────
+breakpoint set --file BuildDriver.cpp --line 157
+breakpoint command add -F maketex_callbacks.on_hash_compare 1
+
+# ── BP 2: Graph update (updateGraphFromFls entry) ─────────────────────────────
+breakpoint set --file BuildDriver.cpp --line 68
+breakpoint command add -F maketex_callbacks.on_graph_update 2
+
+# ── BP 3: New FileNode allocated ──────────────────────────────────────────────
+breakpoint set --file BuildGraph.cpp --line 17
+breakpoint command add -F maketex_callbacks.on_graph_new_file 3
+
+# ── BP 4: New RuleNode allocated ──────────────────────────────────────────────
+breakpoint set --file BuildGraph.cpp --line 29
+breakpoint command add -F maketex_callbacks.on_graph_new_rule 4
+
+# ── BP 5: Engine result (immediately after future.get()) ──────────────────────
+breakpoint set --file BuildDriver.cpp --line 140
+breakpoint command add -F maketex_callbacks.on_engine_result 5
+
+# ── Summary ───────────────────────────────────────────────────────────────────
+breakpoint list
+
+# Run. Remove this line if you want to inspect breakpoints before starting.
+run

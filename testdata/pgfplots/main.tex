@@ -1,0 +1,45 @@
+% Fixture: pgfplots
+%
+% Purpose: verify that inline TikZ/PGFPlots does not cause false reruns.
+%
+% Expected maketex behaviour:
+%   - Engine: pdflatex
+%   - Passes: 1 (no bibliography, no cross-references, no ToC)
+%   - Aux tools: none
+%   - Output: main.pdf
+%
+% TikZ/PGFPlots computation happens entirely within the latex run; no auxiliary
+% files are generated that would trigger a second pass.  A naive build tool
+% that reruns whenever any file changes could be fooled by intermediate temp
+% files written and deleted within a single run.
+
+\documentclass{article}
+\usepackage{pgfplots}
+\pgfplotsset{compat=1.18}
+
+\title{PGFPlots Test}
+\author{Test Fixture}
+\date{2026-06-07}
+
+\begin{document}
+
+\maketitle
+
+\section{Inline plot}
+
+The following plot is computed entirely within a single \LaTeX{} run and should
+not trigger any additional passes.
+
+\begin{tikzpicture}
+\begin{axis}[
+  title={$f(x) = x^2$},
+  xlabel={$x$},
+  ylabel={$f(x)$},
+  width=8cm,
+  height=6cm,
+]
+\addplot[blue, thick, domain=-3:3, samples=60] {x^2};
+\end{axis}
+\end{tikzpicture}
+
+\end{document}
