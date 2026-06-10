@@ -1,0 +1,39 @@
+% Fixture: failures/warn-overfull-hbox
+%
+% Purpose: verify that overfull \hbox layout warnings are surfaced.
+%
+% Expected maketex behaviour:
+%   - Engine: pdflatex
+%   - Passes: 1
+%   - Exit: 0 (success — overfull boxes are warnings, never errors)
+%   - PDF produced (text protrudes into the margin)
+%
+% Log warnings (exact text, dimensions will vary by installation):
+%   Overfull \hbox (Xpt too wide) in paragraph at lines N--M
+%   [] \OT1/cmr/m/n/10 thisisaverylongunbreakablewordthatexceedsthelinewidth ...
+%
+%   Overfull \hbox (Xpt too wide) detected at line N
+%
+% The error surfacing system should:
+%   - classify these as warnings (severity: layout)
+%   - extract the overfull dimension (the "Xpt too wide" part)
+%   - report the line range
+%
+% Two kinds of overfull box are tested:
+%   1. An unbreakable word longer than \linewidth (most common real-world case)
+%   2. An explicit \hbox to 0pt{} that forces overflow
+
+\documentclass{article}
+
+\begin{document}
+
+\section{Unbreakable word}
+
+This paragraph contains a word that cannot be hyphenated and is too long
+to fit in the line: \texttt{thisisaverylongunbreakablewordthatexceedsthelinewidthofanormallatexdocument}.
+
+\section{Explicit overflow}
+
+\noindent\hbox to \linewidth{Left side \hfill Right side that is pushed much too far beyond the margin boundary.}
+
+\end{document}

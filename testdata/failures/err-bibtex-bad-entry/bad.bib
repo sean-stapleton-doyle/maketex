@@ -1,0 +1,11 @@
+% bad.bib — intentionally malformed bibliography database
+%
+% The author field brace is never closed. bibtex will report a parse error
+% and exit with code 2 when processing main.aux.
+
+@article{jones2024,
+  title  = {A Study of Things},
+  author = {Jones, Alice,
+  year   = {2024},
+  journal = {Journal of Things},
+}

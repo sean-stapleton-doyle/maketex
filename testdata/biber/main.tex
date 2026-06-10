@@ -1,0 +1,38 @@
+% Fixture: biber
+%
+% Purpose: verify the biblatex + biber workflow (3-pass build).
+%
+% Expected maketex behaviour:
+%   - Engine: pdflatex
+%   - Passes: 3  (latex → biber → latex → latex)
+%   - Aux tools: biber
+%   - Output: main.pdf
+%
+% Pass 1: latex writes main.bcf; biblatex emits "Please (re)run Biber on the file"
+% biber:  reads main.bcf, writes main.bbl
+% Pass 2: latex reads main.bbl; in-text \cites may still be unresolved
+% Pass 3: latex converges (all citations resolved, no rerun warnings)
+
+\documentclass{article}
+
+\usepackage[backend=biber, style=numeric]{biblatex}
+\addbibresource{refs.bib}
+
+\title{Biber Integration Test}
+\author{Test Fixture}
+\date{2026-06-07}
+
+\begin{document}
+
+\maketitle
+
+\section{Introduction}
+
+This document tests that \texttt{maketex} correctly orchestrates the
+biblatex + biber workflow. Knuth introduced literate programming
+in~\cite{knuth1984literate}, and the \LaTeX{} system is documented
+by Lamport~\cite{lamport1994latex}.
+
+\printbibliography
+
+\end{document}

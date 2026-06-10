@@ -1,0 +1,32 @@
+% Fixture: input-include
+%
+% Purpose: verify dependency tracking across \input and \include sub-files.
+%
+% Expected maketex behaviour:
+%   - Engine: pdflatex
+%   - Passes: 2 (cross-references between included chapters require a second pass)
+%   - Aux tools: none
+%   - Output: main.pdf
+%
+% All sub-files (shared/preamble.tex, chapters/intro.tex, chapters/conclusion.tex)
+% appear in main.fls as INPUT records and are tracked as Source dependencies.
+% \include{} additionally writes chapters/intro.aux and chapters/conclusion.aux
+% which appear as both INPUT and OUTPUT — they are classified as Generated.
+
+\documentclass{article}
+
+\input{shared/preamble}
+
+\title{Input and Include Test}
+\author{Test Fixture}
+\date{2026-06-07}
+
+\begin{document}
+
+\maketitle
+\tableofcontents
+
+\include{chapters/intro}
+\include{chapters/conclusion}
+
+\end{document}

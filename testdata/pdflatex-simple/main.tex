@@ -1,0 +1,28 @@
+% Fixture: pdflatex-simple
+%
+% Purpose: baseline single-file document compiled with pdflatex.
+%
+% Expected maketex behaviour:
+%   - Engine: pdflatex
+%   - Passes: 1 (no bibliography, no cross-references, no ToC)
+%   - Aux tools: none
+%   - Output: main.pdf
+%
+% This is the simplest possible document — a smoke test that the driver
+% can invoke pdflatex, detect that no rerun is needed, and produce a PDF.
+
+\documentclass{article}
+
+\title{Hello, maketex}
+\author{Test Fixture}
+\date{2026-06-06}
+
+\begin{document}
+
+\maketitle
+
+This is a minimal \LaTeX{} document used to verify that \texttt{maketex}
+can invoke \texttt{pdflatex}, collect its output, and recognise that a
+single pass is sufficient.
+
+\end{document}

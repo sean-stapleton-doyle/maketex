@@ -1,0 +1,29 @@
+% Fixture: failures/err-undefined-command
+%
+% Purpose: verify that an undefined control sequence is reported correctly.
+%
+% Expected maketex behaviour:
+%   - Engine: pdflatex -halt-on-error
+%   - Exit: 1 (fatal error)
+%   - No PDF produced
+%
+% Log error (exact text):
+%   ! Undefined control sequence.
+%   l.8 \undefinedmacro
+%
+% The error surfacing system should extract:
+%   - type:    error
+%   - file:    main.tex
+%   - line:    8
+%   - message: Undefined control sequence.
+%   - context: \undefinedmacro
+
+\documentclass{article}
+
+\begin{document}
+
+This document intentionally calls a macro that does not exist.
+
+\undefinedmacro
+
+\end{document}

@@ -1,0 +1,34 @@
+% Fixture: cross-references
+%
+% Purpose: verify that \ref/\label trigger a second latex pass.
+%
+% Expected maketex behaviour:
+%   - Engine: pdflatex
+%   - Passes: 2 (first pass: "Label(s) may have changed. Rerun to get cross-references right.")
+%   - Aux tools: none
+%   - Output: main.pdf
+
+\documentclass{article}
+
+\title{Cross-Reference Test}
+\author{Test Fixture}
+\date{2026-06-07}
+
+\begin{document}
+
+\maketitle
+
+\section{Introduction}
+\label{sec:intro}
+
+This document tests that \texttt{maketex} detects the need for a second pass
+when forward references are used. See Section~\ref{sec:conclusion} for the
+conclusion.
+
+\section{Conclusion}
+\label{sec:conclusion}
+
+As stated in Section~\ref{sec:intro}, two passes are required to resolve
+cross-references.
+
+\end{document}

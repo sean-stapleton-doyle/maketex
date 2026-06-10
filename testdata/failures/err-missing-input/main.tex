@@ -1,0 +1,33 @@
+% Fixture: failures/err-missing-input
+%
+% Purpose: verify that \input referencing a non-existent file is reported.
+%
+% Expected maketex behaviour:
+%   - Engine: pdflatex -halt-on-error
+%   - Exit: 1 (fatal error)
+%   - No PDF produced
+%
+% Log errors (exact text):
+%   ! LaTeX Error: File `this-file-does-not-exist.tex' not found.
+%   ! Emergency stop.
+%
+% The error surfacing system should extract:
+%   - type:    error
+%   - file:    main.tex
+%   - line:    16  (the \input line)
+%   - message: File `this-file-does-not-exist.tex' not found.
+%
+% This is distinct from err-missing-package: the engine looks for a .tex
+% file rather than a .sty file, and the \input command is the trigger.
+
+\documentclass{article}
+
+\begin{document}
+
+This is real content before the error.
+
+\input{this-file-does-not-exist}
+
+This content is never reached.
+
+\end{document}

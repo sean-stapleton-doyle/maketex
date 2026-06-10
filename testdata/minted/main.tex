@@ -1,0 +1,56 @@
+% Fixture: minted
+%
+% Purpose: verify minted syntax highlighting with -shell-escape.
+%
+% Expected maketex behaviour:
+%   - Engine: pdflatex -shell-escape
+%   - Passes: 1 (no cross-references or bibliography)
+%   - Aux tools: pygmentize (invoked automatically by minted via shell-escape)
+%   - Output: main.pdf
+%
+% minted calls pygmentize via \write18 (shell-escape) to highlight source code.
+% It writes temporary files to _minted-main/ that appear in main.fls as both
+% INPUT and OUTPUT within a single run.  The driver must tolerate files that
+% appear and disappear mid-run without treating them as convergence signals.
+%
+% Requires: pygmentize installed (pip install Pygments), -shell-escape flag.
+
+\documentclass{article}
+\usepackage{minted}
+
+\title{Minted Syntax Highlighting Test}
+\author{Test Fixture}
+\date{2026-06-07}
+
+\begin{document}
+
+\maketitle
+
+\section{Python snippet}
+
+\begin{minted}{python}
+def fibonacci(n: int) -> int:
+    """Return the nth Fibonacci number."""
+    if n <= 1:
+        return n
+    a, b = 0, 1
+    for _ in range(2, n + 1):
+        a, b = b, a + b
+    return b
+
+print(fibonacci(10))  # 55
+\end{minted}
+
+\section{C++ snippet}
+
+\begin{minted}{cpp}
+#include <iostream>
+#include <vector>
+
+int main() {
+    std::vector<int> v = {1, 2, 3, 4, 5};
+    for (auto x : v) std::cout << x << ' ';
+}
+\end{minted}
+
+\end{document}

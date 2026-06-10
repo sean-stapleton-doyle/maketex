@@ -1,0 +1,40 @@
+% Fixture: toc
+%
+% Purpose: verify that \tableofcontents triggers a second latex pass.
+%
+% Expected maketex behaviour:
+%   - Engine: pdflatex
+%   - Passes: 2 (first pass writes .toc; second pass reads it and populates the ToC)
+%   - Aux tools: none
+%   - Output: main.pdf
+%
+% LaTeX writes section titles/page numbers to main.toc on pass 1 and reads it
+% on pass 2 to typeset the table of contents.  The .toc file appears as both
+% INPUT and OUTPUT in main.fls, so the driver classifies it as Generated and
+% detects the change between passes.
+
+\documentclass{article}
+
+\title{Table of Contents Test}
+\author{Test Fixture}
+\date{2026-06-07}
+
+\begin{document}
+
+\maketitle
+\tableofcontents
+
+\section{Introduction}
+This document verifies that \texttt{maketex} detects the need for a second
+pass when a table of contents is present.
+
+\section{Background}
+On the first pass \LaTeX{} writes section titles and page numbers to
+\texttt{main.toc}.  On the second pass it reads that file and typesets the
+table of contents correctly.
+
+\section{Conclusion}
+After two passes the table of contents reflects the correct page numbers and
+no further rerun is needed.
+
+\end{document}
