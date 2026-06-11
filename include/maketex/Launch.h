@@ -1,7 +1,7 @@
 #pragma once
 
-#include "Process.h"
-#include "RunResult.h"
+#include "maketex/Process.h"
+#include "maketex/RunResult.h"
 
 #include <filesystem>
 #include <string>

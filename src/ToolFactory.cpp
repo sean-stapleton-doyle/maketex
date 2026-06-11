@@ -1,7 +1,7 @@
-#include "ToolFactory.h"
+#include "maketex/ToolFactory.h"
 
-#include "tools/BibtexTool.h"
-#include "tools/HashTriggeredTool.h"
+#include "maketex/tools/BibtexTool.h"
+#include "maketex/tools/HashTriggeredTool.h"
 
 #include <utility>
 
@@ -27,6 +27,42 @@ std::unique_ptr<ITool> ToolFactory::hashTriggered(
 std::unique_ptr<ITool> ToolFactory::bibtex()
 {
     return std::make_unique<BibtexTool>();
+}
+
+std::optional<ToolKind> parseToolKind(std::string_view name)
+{
+    if (name == "biber")
+        return ToolKind::Biber;
+    if (name == "bibtex")
+        return ToolKind::Bibtex;
+    if (name == "makeglossaries")
+        return ToolKind::Makeglossaries;
+    if (name == "makeindex")
+        return ToolKind::Makeindex;
+    if (name == "pythontex")
+        return ToolKind::Pythontex;
+    return std::nullopt;
+}
+
+std::unique_ptr<ITool> ToolFactory::create(ToolKind kind)
+{
+    switch (kind) {
+    case ToolKind::Biber:
+        return hashTriggered("biber", ".bcf", { "biber", "$job" },
+            InvokerKind::Biber, /*runOnce=*/true);
+    case ToolKind::Bibtex:
+        return bibtex();
+    case ToolKind::Makeglossaries:
+        return hashTriggered("makeglossaries", ".glo",
+            { "makeglossaries", "$job" }, InvokerKind::Makeglossaries);
+    case ToolKind::Makeindex:
+        return hashTriggered("makeindex", ".idx", { "makeindex", "$job" },
+            InvokerKind::Makeindex);
+    case ToolKind::Pythontex:
+        return hashTriggered("pythontex", ".pytxcode", { "pythontex", "$job" },
+            InvokerKind::Pythontex);
+    }
+    std::unreachable();
 }
 
 } // namespace maketex

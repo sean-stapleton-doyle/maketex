@@ -1,4 +1,4 @@
-#include "engines/PdfLatexEngine.h"
+#include "maketex/engines/PdfLatexEngine.h"
 
 #include <filesystem>
 #include <string>

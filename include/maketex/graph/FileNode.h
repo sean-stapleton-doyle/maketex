@@ -1,7 +1,7 @@
 #pragma once
 
-#include "FileStateTracker.h"
-#include "StateDatabase.h"
+#include "maketex/FileStateTracker.h"
+#include "maketex/StateDatabase.h"
 
 #include <filesystem>
 

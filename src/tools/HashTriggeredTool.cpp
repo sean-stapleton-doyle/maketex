@@ -1,7 +1,7 @@
-#include "tools/HashTriggeredTool.h"
+#include "maketex/tools/HashTriggeredTool.h"
 
-#include "EngineInvocation.h"
-#include "IFileHasher.h"
+#include "maketex/EngineInvocation.h"
+#include "maketex/IFileHasher.h"
 
 #include <filesystem>
 #include <utility>

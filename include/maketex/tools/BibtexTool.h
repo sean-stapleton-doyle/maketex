@@ -1,6 +1,6 @@
 #pragma once
 
-#include "ITool.h"
+#include "maketex/ITool.h"
 
 namespace maketex {
 

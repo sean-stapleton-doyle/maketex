@@ -1,7 +1,7 @@
-#include "ToolContext.h"
+#include "maketex/ToolContext.h"
 
-#include "parsers/AuxParser.h"
-#include "parsers/LogParser.h"
+#include "maketex/parsers/AuxParser.h"
+#include "maketex/parsers/LogParser.h"
 
 #include <utility>
 

@@ -1,12 +1,12 @@
 #pragma once
 
-#include "Diagnostic.h"
-#include "EngineInvocation.h"
-#include "IEngine.h"
-#include "RunResult.h"
-#include "StateDatabase.h"
-#include "ToolInvocation.h"
-#include "graph/BuildGraph.h"
+#include "maketex/Diagnostic.h"
+#include "maketex/EngineInvocation.h"
+#include "maketex/IEngine.h"
+#include "maketex/RunResult.h"
+#include "maketex/StateDatabase.h"
+#include "maketex/ToolInvocation.h"
+#include "maketex/graph/BuildGraph.h"
 
 #include <filesystem>
 #include <optional>

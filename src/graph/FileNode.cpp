@@ -1,4 +1,4 @@
-#include "graph/FileNode.h"
+#include "maketex/graph/FileNode.h"
 
 namespace maketex {
 

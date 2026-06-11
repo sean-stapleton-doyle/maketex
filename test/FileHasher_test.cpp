@@ -1,4 +1,4 @@
-#include "Blake3Hasher.h"
+#include "maketex/Blake3Hasher.h"
 
 #include <gtest/gtest.h>
 

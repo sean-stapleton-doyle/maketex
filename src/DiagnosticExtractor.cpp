@@ -1,6 +1,6 @@
-#include "DiagnosticExtractor.h"
+#include "maketex/DiagnosticExtractor.h"
 
-#include "InvokerKind.h"
+#include "maketex/InvokerKind.h"
 
 #include <algorithm>
 #include <charconv>

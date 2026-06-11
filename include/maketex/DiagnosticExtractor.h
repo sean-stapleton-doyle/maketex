@@ -1,9 +1,9 @@
 #pragma once
 
-#include "Diagnostic.h"
-#include "EngineInvocation.h"
-#include "RunResult.h"
-#include "ToolInvocation.h"
+#include "maketex/Diagnostic.h"
+#include "maketex/EngineInvocation.h"
+#include "maketex/RunResult.h"
+#include "maketex/ToolInvocation.h"
 
 #include <vector>
 

@@ -1,7 +1,7 @@
 #pragma once
 
-#include "ITool.h"
-#include "StateDatabase.h"
+#include "maketex/ITool.h"
+#include "maketex/StateDatabase.h"
 
 #include <optional>
 #include <string>

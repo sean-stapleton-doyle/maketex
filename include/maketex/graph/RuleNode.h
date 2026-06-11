@@ -1,7 +1,7 @@
 #pragma once
 
-#include "StateDatabase.h"
-#include "graph/FileNode.h"
+#include "maketex/StateDatabase.h"
+#include "maketex/graph/FileNode.h"
 
 #include <string>
 #include <unordered_set>

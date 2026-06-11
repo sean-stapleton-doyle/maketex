@@ -1,4 +1,4 @@
-#include "engines/LuaLatexEngine.h"
+#include "maketex/engines/LuaLatexEngine.h"
 
 #include <filesystem>
 #include <string>

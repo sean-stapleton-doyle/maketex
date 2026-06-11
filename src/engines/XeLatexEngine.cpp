@@ -1,4 +1,4 @@
-#include "engines/XeLatexEngine.h"
+#include "maketex/engines/XeLatexEngine.h"
 
 #include <filesystem>
 #include <string>

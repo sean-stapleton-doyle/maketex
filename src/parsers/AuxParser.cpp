@@ -1,6 +1,6 @@
-#include "parsers/AuxParser.h"
+#include "maketex/parsers/AuxParser.h"
 
-#include "parsers/TextFileParser.h"
+#include "maketex/parsers/TextFileParser.h"
 
 namespace maketex {
 

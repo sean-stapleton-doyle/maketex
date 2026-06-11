@@ -1,6 +1,6 @@
 #pragma once
 
-#include "IFileHasher.h"
+#include "maketex/IFileHasher.h"
 
 namespace maketex {
 

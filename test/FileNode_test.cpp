@@ -1,8 +1,8 @@
-#include "graph/FileNode.h"
+#include "maketex/graph/FileNode.h"
 
-#include "Blake3Hasher.h"
-#include "IFileHasher.h"
-#include "StateDatabase.h"
+#include "maketex/Blake3Hasher.h"
+#include "maketex/IFileHasher.h"
+#include "maketex/StateDatabase.h"
 
 #include <gtest/gtest.h>
 

@@ -1,9 +1,9 @@
 #pragma once
 
-#include "InvokerKind.h"
-#include "RunDecision.h"
-#include "ToolContext.h"
-#include "ToolInvocation.h"
+#include "maketex/InvokerKind.h"
+#include "maketex/RunDecision.h"
+#include "maketex/ToolContext.h"
+#include "maketex/ToolInvocation.h"
 
 #include <filesystem>
 #include <string>

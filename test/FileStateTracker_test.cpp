@@ -1,7 +1,7 @@
-#include "FileStateTracker.h"
+#include "maketex/FileStateTracker.h"
 
-#include "Blake3Hasher.h"
-#include "IFileHasher.h"
+#include "maketex/Blake3Hasher.h"
+#include "maketex/IFileHasher.h"
 
 #include <gtest/gtest.h>
 

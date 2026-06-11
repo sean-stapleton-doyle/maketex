@@ -1,6 +1,6 @@
 #pragma once
 
-#include "EngineBase.h"
+#include "maketex/EngineBase.h"
 
 #include <string>
 #include <string_view>
@@ -8,12 +8,12 @@
 
 namespace maketex {
 
-class XeLatexEngine : public EngineBase {
+class PdfLatexEngine : public EngineBase {
 public:
     using EngineBase::EngineBase;
 
-    std::string_view name() const override { return "xelatex"; }
-    InvokerKind invokerKind() const override { return InvokerKind::XeLaTeX; }
+    std::string_view name() const override { return "pdflatex"; }
+    InvokerKind invokerKind() const override { return InvokerKind::PdfLatex; }
     std::vector<std::string> buildArgs(const EngineInvocation& inv) const override;
 };
 

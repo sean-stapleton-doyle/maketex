@@ -1,4 +1,4 @@
-#include "DiagnosticExtractor.h"
+#include "maketex/DiagnosticExtractor.h"
 
 #include <gtest/gtest.h>
 

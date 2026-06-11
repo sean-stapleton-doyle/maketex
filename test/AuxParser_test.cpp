@@ -1,4 +1,4 @@
-#include "parsers/AuxParser.h"
+#include "maketex/parsers/AuxParser.h"
 
 #include <gtest/gtest.h>
 
