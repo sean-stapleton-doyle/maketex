@@ -1,5 +1,7 @@
 #include "EngineBase.h"
+#include "engines/LuaLatexEngine.h"
 #include "engines/PdfLatexEngine.h"
+#include "engines/XeLatexEngine.h"
 
 #include <gtest/gtest.h>
 
@@ -132,6 +134,121 @@ TEST_F(EngineBaseTest, pdflatexNoOutputDirByDefault)
     }));
 }
 
+// ── XeLatexEngine / LuaLatexEngine::buildArgs ─────────────────────────────────
+
+TEST_F(EngineBaseTest, xelatexFirstArgIsBinaryAndCoreFlagsPresent)
+{
+    XeLatexEngine engine;
+    EngineInvocation inv;
+    inv.texFile = "doc.tex";
+    auto args = engine.buildArgs(inv);
+    EXPECT_EQ(args.front(), "xelatex");
+    EXPECT_NE(std::ranges::find(args, "-recorder"), args.end());
+    EXPECT_NE(std::ranges::find(args, "-interaction=nonstopmode"), args.end());
+    EXPECT_EQ(args.back(), "doc.tex");
+}
+
+TEST_F(EngineBaseTest, xelatexRunsDirectToPdf)
+{
+    // Unlike latexmk we do not split into xelatex -no-pdf + xdvipdfmx;
+    // xelatex produces the PDF itself.
+    XeLatexEngine engine;
+    EngineInvocation inv;
+    inv.texFile = "doc.tex";
+    auto args = engine.buildArgs(inv);
+    EXPECT_EQ(std::ranges::find(args, "-no-pdf"), args.end());
+}
+
+TEST_F(EngineBaseTest, xelatexInvokerKind)
+{
+    EXPECT_EQ(XeLatexEngine().invokerKind(), InvokerKind::XeLaTeX);
+}
+
+TEST_F(EngineBaseTest, lualatexFirstArgIsBinaryAndCoreFlagsPresent)
+{
+    LuaLatexEngine engine;
+    EngineInvocation inv;
+    inv.texFile = "doc.tex";
+    auto args = engine.buildArgs(inv);
+    EXPECT_EQ(args.front(), "lualatex");
+    EXPECT_NE(std::ranges::find(args, "-recorder"), args.end());
+    EXPECT_NE(std::ranges::find(args, "-interaction=nonstopmode"), args.end());
+    EXPECT_EQ(args.back(), "doc.tex");
+}
+
+TEST_F(EngineBaseTest, lualatexInvokerKind)
+{
+    EXPECT_EQ(LuaLatexEngine().invokerKind(), InvokerKind::LuaLaTeX);
+}
+
+// ── EngineArguments ───────────────────────────────────────────────────────────
+
+TEST_F(EngineBaseTest, engineArgumentsProgramOverridesBinary)
+{
+    PdfLatexEngine engine(EngineArguments { .program = "/opt/tex/pdflatex" });
+    EngineInvocation inv;
+    inv.texFile = "doc.tex";
+    EXPECT_EQ(engine.buildArgs(inv).front(), "/opt/tex/pdflatex");
+}
+
+TEST_F(EngineBaseTest, engineArgumentsExtraOptionsBeforeTexFile)
+{
+    XeLatexEngine engine(EngineArguments { .extraOptions = { "-8bit" } });
+    EngineInvocation inv;
+    inv.texFile = "doc.tex";
+    auto args = engine.buildArgs(inv);
+    auto it = std::ranges::find(args, "-8bit");
+    ASSERT_NE(it, args.end());
+    EXPECT_EQ(args.back(), "doc.tex");
+}
+
+TEST_F(EngineBaseTest, engineArgumentsConflictingKeyLosesToEngineFlag)
+{
+    // -interaction is engine-managed: the user's value must not appear, and
+    // the engine's must survive.
+    PdfLatexEngine engine(
+        EngineArguments { .extraOptions = { "-interaction=batchmode" } });
+    EngineInvocation inv;
+    inv.texFile = "doc.tex";
+    auto args = engine.buildArgs(inv);
+    EXPECT_EQ(std::ranges::find(args, "-interaction=batchmode"), args.end());
+    EXPECT_NE(std::ranges::find(args, "-interaction=nonstopmode"), args.end());
+}
+
+TEST_F(EngineBaseTest, engineArgumentsExactDuplicateFlagDropped)
+{
+    PdfLatexEngine engine(EngineArguments { .extraOptions = { "-recorder" } });
+    EngineInvocation inv;
+    inv.texFile = "doc.tex";
+    auto args = engine.buildArgs(inv);
+    EXPECT_EQ(std::ranges::count(args, std::string("-recorder")), 1);
+}
+
+TEST_F(EngineBaseTest, engineArgumentsRepeatedUserOptionsPassThrough)
+{
+    // Options the engine does not manage may repeat (e.g. -cnf-line);
+    // dedup only runs against the engine-built prefix.
+    LuaLatexEngine engine(EngineArguments {
+        .extraOptions = { "-cnf-line=max_print_line=1000", "-cnf-line=error_line=254" } });
+    EngineInvocation inv;
+    inv.texFile = "doc.tex";
+    auto args = engine.buildArgs(inv);
+    EXPECT_NE(std::ranges::find(args, "-cnf-line=max_print_line=1000"), args.end());
+    EXPECT_NE(std::ranges::find(args, "-cnf-line=error_line=254"), args.end());
+}
+
+TEST_F(EngineBaseTest, engineArgumentsConflictNotTriggeredWhenEngineFlagAbsent)
+{
+    // synctex is off in the invocation, so the engine emits no -synctex flag
+    // and the user's spelling goes through.
+    PdfLatexEngine engine(EngineArguments { .extraOptions = { "-synctex=15" } });
+    EngineInvocation inv;
+    inv.texFile = "doc.tex";
+    inv.synctex = false;
+    auto args = engine.buildArgs(inv);
+    EXPECT_NE(std::ranges::find(args, "-synctex=15"), args.end());
+}
+
 // ── EngineBase::run() ─────────────────────────────────────────────────────────
 
 TEST_F(EngineBaseTest, runReturnsZeroExitAndCapturesStdout)
@@ -161,6 +278,6 @@ TEST_F(EngineBaseTest, runPropagatesNonZeroExit)
     };
 
     FalseEngine engine;
-    auto result = engine.run(EngineInvocation {});
+    auto result = engine.run(EngineInvocation { });
     EXPECT_EQ(result.exitCode, 1);
 }

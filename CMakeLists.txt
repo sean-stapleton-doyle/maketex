@@ -40,6 +40,8 @@ add_library(maketex_lib STATIC
     src/ToolContext.cpp
     src/ToolFactory.cpp
     src/engines/PdfLatexEngine.cpp
+    src/engines/XeLatexEngine.cpp
+    src/engines/LuaLatexEngine.cpp
     src/tools/BibtexTool.cpp
     src/tools/HashTriggeredTool.cpp
     src/DiagnosticExtractor.cpp

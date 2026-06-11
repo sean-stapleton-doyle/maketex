@@ -38,10 +38,10 @@ TEST_F(FlsParserTest, parsesBasicRecord)
 {
     auto fls = writeFls("main.fls",
         "PWD " + m_dir.string() + "\n"
-        "INPUT main.tex\n"
-        "OUTPUT main.pdf\n");
+                                  "INPUT main.tex\n"
+                                  "OUTPUT main.pdf\n");
 
-    auto parsed = FlsParser {}.parse(fls);
+    auto parsed = FlsParser { }.parse(fls);
     ASSERT_TRUE(parsed.has_value());
     const auto& rec = parsed.value();
 
@@ -57,9 +57,10 @@ TEST_F(FlsParserTest, absolutePathInInputLine)
     fs::path absInput = m_dir / "subdir" / "style.sty";
     auto fls = writeFls("main.fls",
         "PWD " + m_dir.string() + "\n"
-        "INPUT " + absInput.string() + "\n");
+                                  "INPUT "
+            + absInput.string() + "\n");
 
-    auto parsed = FlsParser {}.parse(fls);
+    auto parsed = FlsParser { }.parse(fls);
     ASSERT_TRUE(parsed.has_value());
     const auto& rec = parsed.value();
 
@@ -71,12 +72,12 @@ TEST_F(FlsParserTest, deduplicatesRepeatedPaths)
 {
     auto fls = writeFls("main.fls",
         "PWD " + m_dir.string() + "\n"
-        "INPUT main.tex\n"
-        "INPUT main.tex\n"
-        "OUTPUT main.aux\n"
-        "OUTPUT main.aux\n");
+                                  "INPUT main.tex\n"
+                                  "INPUT main.tex\n"
+                                  "OUTPUT main.aux\n"
+                                  "OUTPUT main.aux\n");
 
-    auto parsed = FlsParser {}.parse(fls);
+    auto parsed = FlsParser { }.parse(fls);
     ASSERT_TRUE(parsed.has_value());
     const auto& rec = parsed.value();
 
@@ -89,10 +90,10 @@ TEST_F(FlsParserTest, fileAppearsInBothInputsAndOutputs)
     // .aux is written then re-read in the same run — the canonical rerun trigger.
     auto fls = writeFls("main.fls",
         "PWD " + m_dir.string() + "\n"
-        "OUTPUT main.aux\n"
-        "INPUT main.aux\n");
+                                  "OUTPUT main.aux\n"
+                                  "INPUT main.aux\n");
 
-    auto parsed = FlsParser {}.parse(fls);
+    auto parsed = FlsParser { }.parse(fls);
     ASSERT_TRUE(parsed.has_value());
     const auto& rec = parsed.value();
 
@@ -106,10 +107,11 @@ TEST_F(FlsParserTest, filtersIgnoredPrefix)
     fs::path texmf = m_dir / "texmf";
     auto fls = writeFls("main.fls",
         "PWD " + m_dir.string() + "\n"
-        "INPUT main.tex\n"
-        "INPUT " + (texmf / "latex" / "article.cls").string() + "\n");
+                                  "INPUT main.tex\n"
+                                  "INPUT "
+            + (texmf / "latex" / "article.cls").string() + "\n");
 
-    auto parsed = FlsParser {}.addIgnorePrefix(texmf).parse(fls);
+    auto parsed = FlsParser { }.addIgnorePrefix(texmf).parse(fls);
     ASSERT_TRUE(parsed.has_value());
     const auto& rec = parsed.value();
 
@@ -123,11 +125,13 @@ TEST_F(FlsParserTest, multipleIgnorePrefixes)
     fs::path fonts = m_dir / "fonts";
     auto fls = writeFls("main.fls",
         "PWD " + m_dir.string() + "\n"
-        "INPUT main.tex\n"
-        "INPUT " + (texmf / "article.cls").string() + "\n"
-        "INPUT " + (fonts / "cmr10.tfm").string() + "\n");
+                                  "INPUT main.tex\n"
+                                  "INPUT "
+            + (texmf / "article.cls").string() + "\n"
+                                                 "INPUT "
+            + (fonts / "cmr10.tfm").string() + "\n");
 
-    auto parsed = FlsParser {}
+    auto parsed = FlsParser { }
                       .addIgnorePrefix(texmf)
                       .addIgnorePrefix(fonts)
                       .parse(fls);
@@ -140,7 +144,7 @@ TEST_F(FlsParserTest, multipleIgnorePrefixes)
 
 TEST_F(FlsParserTest, missingFileReturnsError)
 {
-    auto parsed = FlsParser {}.parse(m_dir / "nonexistent.fls");
+    auto parsed = FlsParser { }.parse(m_dir / "nonexistent.fls");
     ASSERT_FALSE(parsed.has_value());
     EXPECT_EQ(parsed.error(), std::errc::no_such_file_or_directory);
 }

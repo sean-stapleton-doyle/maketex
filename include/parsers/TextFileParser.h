@@ -25,7 +25,7 @@ std::expected<void, std::error_code> forEachLine(
     std::string line;
     while (std::getline(f, line))
         fn(line);
-    return {};
+    return { };
 }
 
 } // namespace maketex::detail

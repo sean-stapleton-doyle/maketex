@@ -11,10 +11,10 @@ namespace maketex {
 
 namespace {
 
-std::error_code openError()
-{
-    return std::error_code(errno, std::system_category());
-}
+    std::error_code openError()
+    {
+        return std::error_code(errno, std::system_category());
+    }
 
 } // namespace
 
@@ -56,7 +56,7 @@ std::expected<Hash, std::error_code> Blake3Hasher::hashFile(
                 static_cast<size_t>(file.gcount()));
     }
 
-    Hash result {};
+    Hash result { };
     blake3_hasher_finalize(&ctx, result.data(), result.size());
     return result;
 }

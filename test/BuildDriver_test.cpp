@@ -290,7 +290,7 @@ TEST_F(BuildDriverTest, secondInvocationWithNoChangesSkips)
     ASSERT_EQ(firstRes.passes, 1);
 
     // Second invocation with nothing touched on disk.
-    FakeEngine secondEngine({});
+    FakeEngine secondEngine({ });
     BuildDriver secondDriver(secondEngine, m_db, m_hasher, makeInv());
     auto secondRes = secondDriver.run();
 
@@ -382,11 +382,11 @@ TEST_F(BuildDriverTest, documentsInSameDirectoryKeepSeparateRuleState)
     };
     auto callFor = [&](const std::string& stem) {
         return FakeCall { .writes = {
-            { m_dir / (stem + ".fls"),
-                "PWD " + m_dir.string() + "\n"
-                    + "INPUT " + (m_dir / (stem + ".tex")).string() + "\n" },
-            { m_dir / (stem + ".log"), "This is pdfTeX\n" },
-        } };
+                              { m_dir / (stem + ".fls"),
+                                  "PWD " + m_dir.string() + "\n"
+                                      + "INPUT " + (m_dir / (stem + ".tex")).string() + "\n" },
+                              { m_dir / (stem + ".log"), "This is pdfTeX\n" },
+                          } };
     };
 
     FakeEngine engineA({ callFor("main") });
@@ -397,7 +397,7 @@ TEST_F(BuildDriverTest, documentsInSameDirectoryKeepSeparateRuleState)
 
     // Rebuilding the first document with nothing changed must still skip,
     // even though the second document was built in between.
-    FakeEngine engineA2({});
+    FakeEngine engineA2({ });
     auto res = BuildDriver(engineA2, m_db, m_hasher, invFor("main")).run();
 
     EXPECT_TRUE(res.success);
@@ -427,7 +427,7 @@ TEST_F(BuildDriverTest, secondInvocationFastPathAvoidsRehashing)
     int callsAfterFirstBuild = hasher.callCount;
     ASSERT_GT(callsAfterFirstBuild, 0);
 
-    FakeEngine secondEngine({});
+    FakeEngine secondEngine({ });
     BuildDriver secondDriver(secondEngine, m_db, hasher, makeInv());
     auto res = secondDriver.run();
 
@@ -457,14 +457,14 @@ TEST_F(BuildDriverTest, ignoredPrefixFilesAreNotTracked)
         },
     } });
     BuildDriver firstDriver(firstEngine, m_db, m_hasher, makeInv(),
-        BuildDriver::kDefaultMaxPasses, {}, prefixes);
+        BuildDriver::kDefaultMaxPasses, { }, prefixes);
     ASSERT_TRUE(firstDriver.run().success);
 
     std::ofstream(texmf / "article.cls") << "% class v2, updated distro\n";
 
-    FakeEngine secondEngine({});
+    FakeEngine secondEngine({ });
     BuildDriver secondDriver(secondEngine, m_db, m_hasher, makeInv(),
-        BuildDriver::kDefaultMaxPasses, {}, prefixes);
+        BuildDriver::kDefaultMaxPasses, { }, prefixes);
     auto res = secondDriver.run();
 
     EXPECT_TRUE(res.success);
@@ -482,9 +482,9 @@ TEST_F(BuildDriverTest, toolTriggerChangeDefeatsIncrementalSkip)
         + "INPUT " + texFile.string() + "\n";
     auto engineCall = [&] {
         return FakeCall { .writes = {
-            { m_dir / "main.fls", flsEntry },
-            { m_dir / "main.log", "This is pdfTeX\n" },
-        } };
+                              { m_dir / "main.fls", flsEntry },
+                              { m_dir / "main.log", "This is pdfTeX\n" },
+                          } };
     };
 
     maketex::ToolFactory factory(m_hasher);
@@ -504,7 +504,7 @@ TEST_F(BuildDriverTest, toolTriggerChangeDefeatsIncrementalSkip)
 
     // Second session, nothing changed: tool's recorded input matches → skip.
     {
-        FakeEngine engine({});
+        FakeEngine engine({ });
         auto biber = factory.hashTriggered(
             "biber", ".bcf", { "true" }, InvokerKind::Biber, /*runOnce=*/true);
         BuildDriver driver(engine, m_db, m_hasher, makeInv(),

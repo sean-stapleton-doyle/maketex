@@ -10,6 +10,8 @@ namespace maketex {
 //          trigger file changes. Used for tools that must run at most once per build
 //          (biber, bibtex) to prevent spurious reruns caused by latex rewriting their
 //          input files after the first run.
-enum class RunDecision { Run, Skip, Done };
+enum class RunDecision { Run,
+    Skip,
+    Done };
 
 } // namespace maketex

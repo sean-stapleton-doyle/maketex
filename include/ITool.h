@@ -52,7 +52,7 @@ public:
     virtual std::vector<std::filesystem::path> trackedInputs(
         const ToolContext& /*ctx*/) const
     {
-        return {};
+        return { };
     }
 };
 

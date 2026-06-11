@@ -34,7 +34,7 @@ public:
     }
 
     mutable int callCount = 0;
-    Hash returnHash {};
+    Hash returnHash { };
 };
 
 std::unique_ptr<SQLite::Database> makeMemoryDb()
@@ -126,7 +126,7 @@ TEST_F(FileStateTrackerTest, coldPath_callsHasher_whenMtimeDiffers)
         .exists = true,
         .mtime = 0,
         .size = 6,
-        .hash = {},
+        .hash = { },
     };
     m_db.upsertFileState(stale);
 

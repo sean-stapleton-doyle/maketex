@@ -8,9 +8,9 @@
 namespace maketex {
 
 enum class FileRole {
-    Source,    // user-written: .tex, .bib, images — tracked for out-of-date detection
+    Source, // user-written: .tex, .bib, images — tracked for out-of-date detection
     Generated, // intermediate: .aux, .toc, .bbl — rerun-trigger candidates
-    Output,    // final product: .pdf, .synctex.gz — not tracked for reruns
+    Output, // final product: .pdf, .synctex.gz — not tracked for reruns
 };
 
 // A node in the build dependency graph representing a single file.

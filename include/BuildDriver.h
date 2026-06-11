@@ -25,9 +25,9 @@ class ToolContext;
 // Result of a complete BuildDriver run.
 struct DriverResult {
     bool success = false;
-    int passes = 0;                        // how many latex passes were run
-    std::string lastError;                 // set on failure
-    std::vector<Diagnostic> diagnostics;   // extracted from engine/tool output
+    int passes = 0; // how many latex passes were run
+    std::string lastError; // set on failure
+    std::vector<Diagnostic> diagnostics; // extracted from engine/tool output
 };
 
 // Drives the full multi-pass latex compilation loop.
@@ -52,8 +52,8 @@ public:
         IFileHasher& hasher,
         EngineInvocation inv,
         int maxPasses = kDefaultMaxPasses,
-        std::vector<ITool*> tools = {},
-        std::vector<std::filesystem::path> ignorePrefixes = {});
+        std::vector<ITool*> tools = { },
+        std::vector<std::filesystem::path> ignorePrefixes = { });
 
     DriverResult run();
 

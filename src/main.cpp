@@ -7,7 +7,9 @@
 #include "Process.h"
 #include "StateDatabase.h"
 #include "ToolFactory.h"
+#include "engines/LuaLatexEngine.h"
 #include "engines/PdfLatexEngine.h"
+#include "engines/XeLatexEngine.h"
 
 #include <SQLiteCpp/SQLiteCpp.h>
 
@@ -44,27 +46,43 @@ static std::vector<fs::path> texSystemRoots()
     return roots;
 }
 
-static constexpr std::string_view kUsage = "Usage: maketex [-v|--verbose] <file.tex>\n";
+static constexpr std::string_view kUsage = "Usage: maketex [-v|--verbose] [--engine=pdflatex|xelatex|lualatex] <file.tex>\n";
+
+static std::unique_ptr<maketex::EngineBase> makeEngine(std::string_view name)
+{
+    if (name == "pdflatex")
+        return std::make_unique<maketex::PdfLatexEngine>();
+    if (name == "xelatex")
+        return std::make_unique<maketex::XeLatexEngine>();
+    if (name == "lualatex")
+        return std::make_unique<maketex::LuaLatexEngine>();
+    return nullptr;
+}
 
 static int run(int argc, char* argv[])
 {
     bool verbose = false;
     fs::path texFile;
+    std::string_view engineName = "pdflatex";
 
     for (int i = 1; i < argc; ++i) {
         std::string_view arg(argv[i]);
         if (arg == "--verbose" || arg == "-v") {
             verbose = true;
+        } else if (arg.starts_with("--engine=")) {
+            engineName = arg.substr(std::string_view("--engine=").size());
         } else if (arg == "--help" || arg == "-h") {
             std::cout << kUsage;
             return 0;
         } else if (arg.starts_with("-")) {
-            std::cerr << "maketex: unknown option: " << arg << "\n" << kUsage;
+            std::cerr << "maketex: unknown option: " << arg << "\n"
+                      << kUsage;
             return 1;
         } else if (texFile.empty()) {
             texFile = fs::absolute(arg);
         } else {
-            std::cerr << "maketex: multiple input files given\n" << kUsage;
+            std::cerr << "maketex: multiple input files given\n"
+                      << kUsage;
             return 1;
         }
     }
@@ -78,6 +96,13 @@ static int run(int argc, char* argv[])
         return 1;
     }
 
+    auto engine = makeEngine(engineName);
+    if (!engine) {
+        std::cerr << "maketex: unknown engine: " << engineName << "\n"
+                  << kUsage;
+        return 1;
+    }
+
     fs::path outDir = texFile.parent_path();
     fs::path dbPath = outDir / ".maketex.db";
 
@@ -86,7 +111,6 @@ static int run(int argc, char* argv[])
     maketex::StateDatabase stateDb(std::move(db));
 
     maketex::Blake3Hasher hasher;
-    maketex::PdfLatexEngine engine;
 
     maketex::ToolFactory factory(hasher);
     std::vector<std::unique_ptr<maketex::ITool>> tools;
@@ -113,7 +137,7 @@ static int run(int argc, char* argv[])
 
     std::cout << "maketex: building " << texFile.filename().string() << "\n";
 
-    maketex::BuildDriver driver(engine, stateDb, hasher, inv,
+    maketex::BuildDriver driver(*engine, stateDb, hasher, inv,
         maketex::BuildDriver::kDefaultMaxPasses, std::move(toolPtrs),
         texSystemRoots());
     auto result = driver.run();

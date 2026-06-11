@@ -22,7 +22,7 @@ public:
     // argv[0] is looked up via PATH (posix_spawnp semantics).
     // If workingDir is non-empty the child process starts in that directory.
     explicit Process(std::span<const std::string> argv,
-        const std::filesystem::path& workingDir = {});
+        const std::filesystem::path& workingDir = { });
 
     Process(const Process&) = delete;
     Process& operator=(const Process&) = delete;

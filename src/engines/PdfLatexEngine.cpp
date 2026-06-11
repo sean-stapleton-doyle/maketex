@@ -9,7 +9,7 @@ namespace maketex {
 std::vector<std::string> PdfLatexEngine::buildArgs(const EngineInvocation& inv) const
 {
     std::vector<std::string> args;
-    args.emplace_back("pdflatex");
+    args.emplace_back(programOr("pdflatex"));
     // -recorder is mandatory: the .fls it produces is the authoritative
     // dependency source for the fixed-point loop.
     args.emplace_back("-recorder");
@@ -27,6 +27,7 @@ std::vector<std::string> PdfLatexEngine::buildArgs(const EngineInvocation& inv) 
         args.emplace_back("-output-directory=" + inv.outputDir.string());
     if (inv.jobName)
         args.emplace_back("-jobname=" + *inv.jobName);
+    appendExtraOptions(args);
     args.emplace_back(inv.texFile.string());
     return args;
 }

@@ -26,10 +26,10 @@ std::expected<AuxRecord, std::error_code> AuxParser::parse(const fs::path& path)
 std::string_view AuxParser::extractBraces(std::string_view line, std::string_view prefix)
 {
     if (!line.starts_with(prefix))
-        return {};
+        return { };
     auto end = line.rfind('}');
     if (end == std::string_view::npos || end < prefix.size())
-        return {};
+        return { };
     return line.substr(prefix.size(), end - prefix.size());
 }
 

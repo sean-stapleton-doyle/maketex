@@ -8,9 +8,15 @@ void format(const std::vector<Diagnostic>& diagnostics, std::ostream& out, bool 
 {
     for (const auto& d : diagnostics) {
         switch (d.severity) {
-        case Diagnostic::Severity::Error:   out << "error";   break;
-        case Diagnostic::Severity::Warning: out << "warning"; break;
-        case Diagnostic::Severity::Info:    out << "note";    break;
+        case Diagnostic::Severity::Error:
+            out << "error";
+            break;
+        case Diagnostic::Severity::Warning:
+            out << "warning";
+            break;
+        case Diagnostic::Severity::Info:
+            out << "note";
+            break;
         }
 
         if (!d.file.empty()) {

@@ -44,7 +44,7 @@ std::vector<fs::path> HashTriggeredTool::trackedInputs(const ToolContext& ctx) c
 {
     auto trigger = triggerPath(ctx);
     if (!fs::exists(trigger))
-        return {};
+        return { };
     return { trigger };
 }
 
