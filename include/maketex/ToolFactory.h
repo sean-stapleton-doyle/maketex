@@ -1,15 +1,30 @@
 #pragma once
 
-#include "InvokerKind.h"
+#include "maketex/InvokerKind.h"
 
 #include <memory>
+#include <optional>
 #include <string>
+#include <string_view>
 #include <vector>
 
 namespace maketex {
 
 class IFileHasher;
 class ITool;
+
+// The auxiliary tools maketex can run between engine passes.
+enum class ToolKind {
+    Biber,
+    Bibtex,
+    Makeglossaries,
+    Makeindex,
+    Pythontex,
+};
+
+// Maps a config/CLI tool name ("biber", "makeindex", ...) to its kind, or
+// nullopt for unknown names — callers own the error reporting.
+std::optional<ToolKind> parseToolKind(std::string_view name);
 
 // Constructs ITool instances, holding shared dependencies (the file hasher).
 // Returned tools are owned by the caller via unique_ptr.
@@ -30,6 +45,10 @@ public:
 
     // Classic BibTeX. Fires when the .aux file lists \bibdata entries.
     std::unique_ptr<ITool> bibtex();
+
+    // Constructs the tool for kind with its standard recipe (trigger file,
+    // command line, run-once behavior). Total: every ToolKind yields a tool.
+    std::unique_ptr<ITool> create(ToolKind kind);
 
 private:
     IFileHasher& m_hasher;

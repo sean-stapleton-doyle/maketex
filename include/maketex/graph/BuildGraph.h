@@ -1,7 +1,7 @@
 #pragma once
 
-#include "graph/FileNode.h"
-#include "graph/RuleNode.h"
+#include "maketex/graph/FileNode.h"
+#include "maketex/graph/RuleNode.h"
 
 #include <filesystem>
 #include <memory>

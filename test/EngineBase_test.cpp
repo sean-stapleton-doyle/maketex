@@ -1,7 +1,7 @@
-#include "EngineBase.h"
-#include "engines/LuaLatexEngine.h"
-#include "engines/PdfLatexEngine.h"
-#include "engines/XeLatexEngine.h"
+#include "maketex/EngineBase.h"
+#include "maketex/engines/LuaLatexEngine.h"
+#include "maketex/engines/PdfLatexEngine.h"
+#include "maketex/engines/XeLatexEngine.h"
 
 #include <gtest/gtest.h>
 

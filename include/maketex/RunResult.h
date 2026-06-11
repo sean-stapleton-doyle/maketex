@@ -1,6 +1,6 @@
 #pragma once
 
-#include "InvokerKind.h"
+#include "maketex/InvokerKind.h"
 
 #include <string>
 

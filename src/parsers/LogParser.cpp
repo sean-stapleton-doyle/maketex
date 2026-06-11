@@ -1,6 +1,6 @@
-#include "parsers/LogParser.h"
+#include "maketex/parsers/LogParser.h"
 
-#include "parsers/TextFileParser.h"
+#include "maketex/parsers/TextFileParser.h"
 
 #include <string_view>
 

@@ -1,6 +1,6 @@
 #pragma once
 
-#include "Diagnostic.h"
+#include "maketex/Diagnostic.h"
 
 #include <iosfwd>
 #include <vector>

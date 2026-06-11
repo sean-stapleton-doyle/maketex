@@ -1,6 +1,6 @@
-#include "parsers/FlsParser.h"
+#include "maketex/parsers/FlsParser.h"
 
-#include "parsers/TextFileParser.h"
+#include "maketex/parsers/TextFileParser.h"
 
 #include <algorithm>
 #include <unordered_set>

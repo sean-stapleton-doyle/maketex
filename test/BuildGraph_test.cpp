@@ -1,4 +1,4 @@
-#include "graph/BuildGraph.h"
+#include "maketex/graph/BuildGraph.h"
 
 #include <gtest/gtest.h>
 

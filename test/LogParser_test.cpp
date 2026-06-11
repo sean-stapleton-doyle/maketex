@@ -1,4 +1,4 @@
-#include "parsers/LogParser.h"
+#include "maketex/parsers/LogParser.h"
 
 #include <gtest/gtest.h>
 

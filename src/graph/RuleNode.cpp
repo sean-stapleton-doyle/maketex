@@ -1,4 +1,4 @@
-#include "graph/RuleNode.h"
+#include "maketex/graph/RuleNode.h"
 
 #include <ctime>
 

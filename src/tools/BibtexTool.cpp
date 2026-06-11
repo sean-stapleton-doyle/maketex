@@ -1,7 +1,7 @@
-#include "tools/BibtexTool.h"
+#include "maketex/tools/BibtexTool.h"
 
-#include "EngineInvocation.h"
-#include "parsers/AuxParser.h"
+#include "maketex/EngineInvocation.h"
+#include "maketex/parsers/AuxParser.h"
 
 #include <filesystem>
 

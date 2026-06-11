@@ -1,7 +1,7 @@
-#include "graph/RuleNode.h"
+#include "maketex/graph/RuleNode.h"
 
-#include "Blake3Hasher.h"
-#include "graph/FileNode.h"
+#include "maketex/Blake3Hasher.h"
+#include "maketex/graph/FileNode.h"
 
 #include <gtest/gtest.h>
 

@@ -1,7 +1,7 @@
 #pragma once
 
-#include "IFileHasher.h"
-#include "StateDatabase.h"
+#include "maketex/IFileHasher.h"
+#include "maketex/StateDatabase.h"
 
 #include <gtest/gtest.h>
 

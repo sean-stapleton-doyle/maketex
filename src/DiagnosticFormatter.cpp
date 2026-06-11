@@ -1,4 +1,4 @@
-#include "DiagnosticFormatter.h"
+#include "maketex/DiagnosticFormatter.h"
 
 #include <ostream>
 

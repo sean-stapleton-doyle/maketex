@@ -33,7 +33,7 @@ CPMAddPackage("gh:SRombauts/SQLiteCpp#3.3.2")
 CPMAddPackage("gh:google/googletest#v1.16.0")
 
 # ── Core library (shared by executable and tests) ─────────────────────────────
-add_library(maketex_lib STATIC
+add_library(maketex STATIC
     src/StateDatabase.cpp
     src/Process.cpp
     src/EngineBase.cpp
@@ -55,16 +55,19 @@ add_library(maketex_lib STATIC
     src/graph/RuleNode.cpp
     src/graph/BuildGraph.cpp
     src/BuildDriver.cpp
+    src/engines/EngineFactory.cpp
+    src/Build.cpp
 )
+add_library(maketex::maketex ALIAS maketex)
 
-target_include_directories(maketex_lib PUBLIC include)
+target_include_directories(maketex PUBLIC include)
 
-target_link_libraries(maketex_lib PUBLIC
+target_link_libraries(maketex PUBLIC
     BLAKE3::blake3
     SQLiteCpp
 )
 
-target_compile_options(maketex_lib PRIVATE
+target_compile_options(maketex PRIVATE
     -Wall
     -Wextra
     -Wpedantic
@@ -72,12 +75,13 @@ target_compile_options(maketex_lib PRIVATE
     -Wconversion
 )
 
-# ── Main executable ───────────────────────────────────────────────────────────
-add_executable(maketex src/main.cpp)
+# ── End-to-end harness (the eventual CLI lives elsewhere) ────────────────────
+add_executable(maketex_cli apps/main.cpp)
+set_target_properties(maketex_cli PROPERTIES OUTPUT_NAME maketex)
 
-target_link_libraries(maketex PRIVATE maketex_lib)
+target_link_libraries(maketex_cli PRIVATE maketex::maketex)
 
-target_compile_options(maketex PRIVATE
+target_compile_options(maketex_cli PRIVATE
     -Wall
     -Wextra
     -Wpedantic
@@ -92,6 +96,7 @@ if(CLANG_FORMAT)
         ${CMAKE_SOURCE_DIR}/src/*.cpp
         ${CMAKE_SOURCE_DIR}/src/*.h
         ${CMAKE_SOURCE_DIR}/include/*.h
+        ${CMAKE_SOURCE_DIR}/apps/*.cpp
         ${CMAKE_SOURCE_DIR}/test/*.cpp
     )
     add_custom_target(format
@@ -113,7 +118,7 @@ if(TEST_SOURCES)
     add_executable(maketex_tests ${TEST_SOURCES})
 
     target_link_libraries(maketex_tests PRIVATE
-        maketex_lib
+        maketex
         GTest::gtest_main
     )
 

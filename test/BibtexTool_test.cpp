@@ -1,4 +1,4 @@
-#include "tools/BibtexTool.h"
+#include "maketex/tools/BibtexTool.h"
 
 #include <gtest/gtest.h>
 

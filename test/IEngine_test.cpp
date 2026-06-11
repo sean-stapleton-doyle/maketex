@@ -1,6 +1,6 @@
-#include "IEngine.h"
+#include "maketex/IEngine.h"
 
-#include "RunResult.h"
+#include "maketex/RunResult.h"
 
 #include <gtest/gtest.h>
 
