@@ -23,7 +23,7 @@ namespace {
         auto first = sv.data();
         auto last = sv.data() + sv.size();
         auto [ptr, ec] = std::from_chars(first, last, value);
-        if (ec != std::errc {} || ptr != last)
+        if (ec != std::errc { } || ptr != last)
             return std::nullopt;
         return value;
     }
@@ -322,63 +322,63 @@ namespace {
 
 namespace diagnostics {
 
-// ── public interface ──────────────────────────────────────────────────────────
+    // ── public interface ──────────────────────────────────────────────────────────
 
-std::vector<Diagnostic> extract(const RunResult<EngineInvocation>& result)
-{
-    std::vector<Diagnostic> diags;
+    std::vector<Diagnostic> extract(const RunResult<EngineInvocation>& result)
+    {
+        std::vector<Diagnostic> diags;
 
-    switch (result.kind) {
-    case InvokerKind::PdfLatex:
-    case InvokerKind::XeLaTeX:
-    case InvokerKind::LuaLaTeX:
+        switch (result.kind) {
+        case InvokerKind::PdfLatex:
+        case InvokerKind::XeLaTeX:
+        case InvokerKind::LuaLaTeX:
+            if (result.success())
+                diags = extractLatexWarnings(result.stdoutOutput, result.invocation.texFile);
+            else
+                diags = extractLatex(result.stdoutOutput, result.invocation.texFile);
+            break;
+        default:
+            break;
+        }
+
+        if (!result.success() && diags.empty())
+            diags.push_back(makeFallback(result.stdoutOutput));
+
+        return diags;
+    }
+
+    std::vector<Diagnostic> extract(const RunResult<ToolInvocation>& result)
+    {
         if (result.success())
-            diags = extractLatexWarnings(result.stdoutOutput, result.invocation.texFile);
-        else
-            diags = extractLatex(result.stdoutOutput, result.invocation.texFile);
-        break;
-    default:
-        break;
+            return { };
+
+        std::vector<Diagnostic> diags;
+
+        switch (result.kind) {
+        case InvokerKind::Bibtex:
+            diags = extractBibtex(result.stdoutOutput);
+            break;
+        case InvokerKind::Biber:
+            diags = extractBiber(result.stdoutOutput);
+            break;
+        case InvokerKind::Makeindex:
+            diags = extractMakeindex(result.stdoutOutput);
+            break;
+        case InvokerKind::Makeglossaries:
+            diags = extractMakeglossaries(result.stdoutOutput);
+            break;
+        case InvokerKind::Pythontex:
+            diags = extractPythontex(result.stdoutOutput);
+            break;
+        default:
+            break;
+        }
+
+        if (diags.empty())
+            diags.push_back(makeFallback(result.stdoutOutput));
+
+        return diags;
     }
-
-    if (!result.success() && diags.empty())
-        diags.push_back(makeFallback(result.stdoutOutput));
-
-    return diags;
-}
-
-std::vector<Diagnostic> extract(const RunResult<ToolInvocation>& result)
-{
-    if (result.success())
-        return {};
-
-    std::vector<Diagnostic> diags;
-
-    switch (result.kind) {
-    case InvokerKind::Bibtex:
-        diags = extractBibtex(result.stdoutOutput);
-        break;
-    case InvokerKind::Biber:
-        diags = extractBiber(result.stdoutOutput);
-        break;
-    case InvokerKind::Makeindex:
-        diags = extractMakeindex(result.stdoutOutput);
-        break;
-    case InvokerKind::Makeglossaries:
-        diags = extractMakeglossaries(result.stdoutOutput);
-        break;
-    case InvokerKind::Pythontex:
-        diags = extractPythontex(result.stdoutOutput);
-        break;
-    default:
-        break;
-    }
-
-    if (diags.empty())
-        diags.push_back(makeFallback(result.stdoutOutput));
-
-    return diags;
-}
 
 } // namespace diagnostics
 

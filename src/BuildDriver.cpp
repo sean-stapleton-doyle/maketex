@@ -78,15 +78,10 @@ ToolContext BuildDriver::makeToolContext() const
 {
     auto logFile = logPath(m_inv);
     auto auxFile = auxPath(m_inv);
-    return ToolContext(m_inv,
-        [logFile]() {
-            return LogParser {}.parse(logFile).value_or(LogRecord {});
-        },
-        [auxFile]() {
+    return ToolContext(m_inv, [logFile]() { return LogParser { }.parse(logFile).value_or(LogRecord { }); }, [auxFile]() {
             if (!fs::exists(auxFile))
                 return AuxRecord {};
-            return AuxParser {}.parse(auxFile).value_or(AuxRecord {});
-        });
+            return AuxParser {}.parse(auxFile).value_or(AuxRecord {}); });
 }
 
 // ── BuildDriver::updateGraphFromFls ───────────────────────────────────────────

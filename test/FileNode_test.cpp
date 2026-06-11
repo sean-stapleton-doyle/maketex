@@ -34,7 +34,7 @@ public:
     }
 
     mutable int callCount = 0;
-    Hash returnHash {};
+    Hash returnHash { };
 };
 
 std::unique_ptr<SQLite::Database> makeMemoryDb()
@@ -103,4 +103,3 @@ TEST_F(FileNodeTest, refreshReturnsAbsentForMissingFile)
 
     EXPECT_FALSE(state.exists);
 }
-

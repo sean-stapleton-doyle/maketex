@@ -19,7 +19,7 @@ struct FileState {
     bool exists = false;
     int64_t mtime = 0;
     int64_t size = 0;
-    Hash hash = {};
+    Hash hash = { };
 
     static FileState absent(std::string path)
     {

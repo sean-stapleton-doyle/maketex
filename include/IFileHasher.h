@@ -21,7 +21,7 @@ public:
     // cannot be opened.
     virtual std::expected<Hash, std::error_code> hashFile(
         const std::filesystem::path& path,
-        const std::optional<std::regex>& ignorePattern = {}) const = 0;
+        const std::optional<std::regex>& ignorePattern = { }) const = 0;
 };
 
 } // namespace maketex

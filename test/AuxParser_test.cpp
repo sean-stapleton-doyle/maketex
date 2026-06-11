@@ -36,7 +36,7 @@ TEST_F(AuxParserTest, emptyAux_emptyRecord)
 {
     auto aux = writeAux("main.aux", "\\relax\n");
 
-    auto parsed = AuxParser {}.parse(aux);
+    auto parsed = AuxParser { }.parse(aux);
     ASSERT_TRUE(parsed.has_value());
 
     EXPECT_TRUE(parsed.value().bibDataFiles.empty());
@@ -46,7 +46,7 @@ TEST_F(AuxParserTest, extractsBibData)
 {
     auto aux = writeAux("main.aux", "\\bibdata{references}\n");
 
-    auto parsed = AuxParser {}.parse(aux);
+    auto parsed = AuxParser { }.parse(aux);
     ASSERT_TRUE(parsed.has_value());
     const auto& rec = parsed.value();
 
@@ -58,7 +58,7 @@ TEST_F(AuxParserTest, extractsMultipleBibDataFiles)
 {
     auto aux = writeAux("main.aux", "\\bibdata{refs1,refs2,refs3}\n");
 
-    auto parsed = AuxParser {}.parse(aux);
+    auto parsed = AuxParser { }.parse(aux);
     ASSERT_TRUE(parsed.has_value());
     const auto& rec = parsed.value();
 
@@ -78,7 +78,7 @@ TEST_F(AuxParserTest, ignoresOtherAuxContent)
         "\\newlabel{sec:intro}{{1}{1}{Introduction}{section.1}{}}\n"
         "\\gdef \\@abspage@last{5}\n");
 
-    auto parsed = AuxParser {}.parse(aux);
+    auto parsed = AuxParser { }.parse(aux);
     ASSERT_TRUE(parsed.has_value());
 
     EXPECT_TRUE(parsed.value().bibDataFiles.empty());
@@ -86,7 +86,7 @@ TEST_F(AuxParserTest, ignoresOtherAuxContent)
 
 TEST_F(AuxParserTest, missingFileReturnsError)
 {
-    auto parsed = AuxParser {}.parse(m_dir / "nonexistent.aux");
+    auto parsed = AuxParser { }.parse(m_dir / "nonexistent.aux");
     ASSERT_FALSE(parsed.has_value());
     EXPECT_EQ(parsed.error(), std::errc::no_such_file_or_directory);
 }
