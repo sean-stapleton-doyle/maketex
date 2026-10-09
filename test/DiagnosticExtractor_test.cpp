@@ -241,7 +241,8 @@ TEST(DiagnosticExtractor, bibtexMissingEntryIsUndefinedCitation)
     RunResult<ToolInvocation> result {
         .invocation = ToolInvocation { .jobName = "main" },
         .kind = InvokerKind::Bibtex,
-        .exitCode = 2,
+        // Warnings-only runs exit 0; the warning must still be reported.
+        .exitCode = 0,
         .stdoutOutput
         = "Warning--I didn't find a database entry for \"missingkey\"\n",
     };
@@ -457,4 +458,159 @@ TEST_F(DiagnosticAttributionTest, missingPackageIsAttributedToItsUsepackageLine)
         "./main.tex:4: LaTeX Error: File `biblatex.sty' not found.\n", 1));
     ASSERT_EQ(diags.size(), 1u);
     EXPECT_EQ(diags[0].line, 3);
+}
+
+// ── bibtex errors (captured from TeX Live 2026 bibtex 0.99e) ────────────────
+
+namespace {
+
+RunResult<ToolInvocation> bibtexResult(std::string out, int exitCode)
+{
+    return RunResult<ToolInvocation> {
+        .kind = InvokerKind::Bibtex,
+        .exitCode = exitCode,
+        .stdoutOutput = std::move(out),
+    };
+}
+
+} // namespace
+
+TEST(DiagnosticExtractor, bibtexSyntaxErrorPointsIntoTheBibFile)
+{
+    auto diags = diagnostics::extract(bibtexResult(
+        "This is BibTeX, Version 0.99e (TeX Live 2026)\n"
+        "The top-level auxiliary file: main.aux\n"
+        "The style file: plain.bst\n"
+        "Database file #1: refs.bib\n"
+        "I was expecting a `,' or a `}'---line 1 of file refs.bib\n"
+        " : @book{broken \n"
+        " :              title={X}}\n"
+        "I'm skipping whatever remains of this entry\n"
+        "Warning--I didn't find a database entry for \"nosuchkey\"\n"
+        "(There was 1 error message)\n",
+        2));
+    ASSERT_EQ(diags.size(), 2u);
+    EXPECT_EQ(diags[0].severity, Diagnostic::Severity::Error);
+    EXPECT_EQ(diags[0].message, "I was expecting a `,' or a `}'");
+    EXPECT_EQ(diags[0].file, "refs.bib");
+    EXPECT_EQ(diags[0].line, 1);
+    EXPECT_NE(diags[0].rawContext.find("@book{broken"), std::string::npos);
+    EXPECT_EQ(diags[1].category, "undefined-citation");
+}
+
+TEST(DiagnosticExtractor, bibtexMissingDatabaseNamesTheFile)
+{
+    auto diags = diagnostics::extract(bibtexResult(
+        "I couldn't open database file refs.bib\n"
+        "---line 4 of file main.aux\n"
+        " : \\bibdata{refs\n"
+        " :              }\n"
+        "I'm skipping whatever remains of this command\n"
+        "I found no database files---while reading file main.aux\n",
+        2));
+    ASSERT_GE(diags.size(), 1u);
+    EXPECT_EQ(diags[0].category, "missing-file");
+    EXPECT_EQ(diags[0].missingFile, "refs.bib");
+    EXPECT_EQ(diags[0].file, "refs.bib");
+}
+
+TEST(DiagnosticExtractor, bibtexMissingAuxIsNotGarbled)
+{
+    auto diags = diagnostics::extract(bibtexResult(
+        "I couldn't open file name `main.aux'\n", 2));
+    ASSERT_EQ(diags.size(), 1u);
+    EXPECT_EQ(diags[0].missingFile, "main.aux");
+}
+
+// ── more TeX warning forms ───────────────────────────────────────────────────
+
+TEST(DiagnosticExtractor, boxAndFontAndClassWarnings)
+{
+    auto diags = diagnostics::extract(latexResult(
+        "Underfull \\hbox (badness 10000) detected at line 7\n"
+        "[]\\T1/cmr/m/n/10 (see\n"
+        "\n"
+        "Overfull \\vbox (3.0pt too high) has occurred while \\output is active\n"
+        "\n"
+        "LaTeX Font Warning: Font shape `OT1/cmr/bx/sc' undefined\n"
+        "(Font)              using `OT1/cmr/bx/n' instead on input line 12.\n"
+        "Class memoir Warning: Unknown option `foo'.\n"
+        "Package natbib Warning: Citation `knuth' on page 1 undefined on input line 3.\n",
+        0));
+    ASSERT_EQ(diags.size(), 5u);
+    EXPECT_EQ(diags[0].category, "underfull-hbox");
+    EXPECT_EQ(diags[0].severity, Diagnostic::Severity::Info);
+    EXPECT_EQ(diags[0].line, 7);
+    EXPECT_EQ(diags[1].category, "overfull-vbox");
+    EXPECT_EQ(diags[2].category, "font");
+    EXPECT_EQ(diags[2].line, 12);
+    EXPECT_NE(diags[2].message.find("using `OT1/cmr/bx/n' instead"), std::string::npos);
+    EXPECT_EQ(diags[3].category, "class");
+    EXPECT_EQ(diags[4].category, "undefined-citation");
+}
+
+TEST(DiagnosticExtractor, latexWarningContinuationIsFolded)
+{
+    auto diags = diagnostics::extract(latexResult(
+        "LaTeX Warning: You have requested package `chapters/macros',\n"
+        "               but the package provides `macros'.\n",
+        0));
+    ASSERT_EQ(diags.size(), 1u);
+    EXPECT_NE(diags[0].message.find("but the package provides"), std::string::npos);
+}
+
+TEST(DiagnosticExtractor, pdftexEngineErrorIsReported)
+{
+    auto diags = diagnostics::extract(latexResult(
+        "!pdfTeX error: pdflatex (file ./fig.pdf): PDF inclusion: required page does not exist <2>\n"
+        " ==> Fatal error occurred, no output PDF file produced!\n",
+        1));
+    ASSERT_GE(diags.size(), 1u);
+    EXPECT_EQ(diags[0].severity, Diagnostic::Severity::Error);
+    EXPECT_TRUE(diags[0].message.starts_with("pdfTeX error:")) << diags[0].message;
+}
+
+TEST(DiagnosticExtractor, failedBuildAlsoReportsUsefulWarnings)
+{
+    auto diags = diagnostics::extract(latexResult(
+        "LaTeX Warning: Reference `fig:x' on page 1 undefined on input line 4.\n"
+        "Overfull \\hbox (1.0pt too wide) in paragraph at lines 5--6\n"
+        "\n"
+        "./main.tex:9: Undefined control sequence.\n"
+        "l.9 \\bad\n",
+        1));
+    ASSERT_EQ(diags.size(), 2u);
+    EXPECT_EQ(diags[0].severity, Diagnostic::Severity::Error);
+    EXPECT_EQ(diags[1].category, "undefined-reference");
+}
+
+TEST_F(DiagnosticAttributionTest, parensInEchoedSourceDoNotCorruptAttribution)
+{
+    writeFile("main.tex", "x");
+    std::filesystem::create_directories(m_dir / "chapters");
+    writeFile("chapters/ch1.tex", "y");
+    // The echoed source line has an unbalanced ")" that must not pop ch1.
+    auto diags = diagnostics::extract(resultIn(
+        "(./main.tex (./chapters/ch1.tex\n"
+        "! Undefined control sequence.\n"
+        "l.3 see figure 2)\n"
+        "                  \\bad\n"
+        "! Undefined control sequence.\n"
+        "l.4 \\worse\n",
+        1));
+    ASSERT_EQ(diags.size(), 2u);
+    EXPECT_EQ(diags[1].file, "chapters/ch1.tex");
+}
+
+TEST_F(DiagnosticAttributionTest, quotedFileNamesWithSpaces)
+{
+    writeFile("main.tex", "x");
+    writeFile("my chapter.tex", "y");
+    auto diags = diagnostics::extract(resultIn(
+        "(./main.tex (\"./my chapter.tex\"\n"
+        "! Undefined control sequence.\n"
+        "l.1 \\bad\n",
+        1));
+    ASSERT_EQ(diags.size(), 1u);
+    EXPECT_EQ(diags[0].file, "my chapter.tex");
 }
