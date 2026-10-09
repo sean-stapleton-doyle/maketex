@@ -210,18 +210,23 @@ PackageLookup tlmgrLookup(fs::path cacheDir)
     };
 }
 
+bool isInstallable(const Diagnostic& d)
+{
+    if (d.missingFile.empty())
+        return false;
+    if (d.category == "missing-tool")
+        return true;
+    auto ext = fs::path(d.missingFile).extension();
+    return d.category == "missing-file" && (ext == ".sty" || ext == ".cls");
+}
+
 void addInstallHints(std::vector<Diagnostic>& diagnostics)
 {
     std::optional<TexDistribution> distro;
     std::optional<PackageLookup> lookup;
     for (auto& d : diagnostics) {
-        if (d.missingFile.empty() || !d.hint.empty())
-            continue;
-        if (d.category != "missing-file" && d.category != "missing-tool")
-            continue;
         // A missing \input'd .tex file is the user's, not a package.
-        auto ext = fs::path(d.missingFile).extension();
-        if (d.category == "missing-file" && ext != ".sty" && ext != ".cls")
+        if (!d.hint.empty() || !isInstallable(d))
             continue;
         if (!distro) {
             distro = detectDistribution();

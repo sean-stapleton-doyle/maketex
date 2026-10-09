@@ -91,3 +91,29 @@ TEST_F(DocumentProbeTest, rootCycleStopsAtTheStart)
     writeFile("b.tex", "% !TEX root = a.tex\n");
     EXPECT_EQ(maketex::resolveRootDocument(a), a);
 }
+
+TEST_F(DocumentProbeTest, requirementsListToolsAndShellEscape)
+{
+    writeFile("chapter.tex", "\\printindex\n\\bibliography{refs}\n");
+    auto tex = writeFile("main.tex",
+        "\\documentclass{book}\n"
+        "\\usepackage{biblatex, minted}\n\\usepackage{makeidx}\n\\makeindex\n"
+        "\\begin{document}\n\\include{chapter}\n\\end{document}\n");
+    auto req = maketex::analyzeRequirements(tex);
+    EXPECT_EQ(req.documentClass, "book");
+    EXPECT_EQ(req.packages, (std::vector<std::string> { "biblatex", "makeidx", "minted" }));
+    std::vector<std::string> programs;
+    for (const auto& [program, why] : req.programs)
+        programs.push_back(program);
+    // \bibliography lives in the \include'd chapter.
+    EXPECT_EQ(programs, (std::vector<std::string> { "biber", "bibtex", "makeindex", "pygmentize" }));
+    EXPECT_TRUE(req.needsShellEscape);
+}
+
+TEST_F(DocumentProbeTest, biblatexWithBibtexBackendNeedsBibtex)
+{
+    auto tex = writeFile("main.tex", "\\documentclass{article}\n\\usepackage[backend=bibtex]{biblatex}\n");
+    auto req = maketex::analyzeRequirements(tex);
+    ASSERT_EQ(req.programs.size(), 1u);
+    EXPECT_EQ(req.programs[0].first, "bibtex");
+}

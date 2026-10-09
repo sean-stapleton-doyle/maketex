@@ -76,6 +76,10 @@ max-passes = 8
 # limit.
 timeout = 300
 
+# Install missing packages and tools with tlmgr, then rebuild. See USAGE.md,
+# "Missing packages and programs". Default: false.
+install-missing = false
+
 [engine-args]
 # Executable to spawn instead of the engine's default binary name.
 program = "lualatex-dev"
@@ -111,6 +115,7 @@ extra-extensions = [".tikz-cache"]
 | `halt-on-error` | `--halt-on-error` / `--no-halt-on-error` |
 | `max-passes` | `--max-passes` |
 | `timeout` | `--timeout` |
+| `install-missing` | `--install-missing` / `--no-install-missing` |
 | `watch.interval-ms` | `--interval-ms` (watch only) |
 | `watch.extra-paths` | — (config only) |
 | `clean.extra-extensions` | — (config only) |

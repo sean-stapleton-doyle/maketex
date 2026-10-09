@@ -108,9 +108,12 @@ std::expected<EffectiveOptions, std::string> assembleOptions(
     BuildOptions& build = out.build;
 
     auto texFile = resolveTexFile(args, config, fs::current_path());
-    if (!texFile)
+    if (texFile)
+        build.texFile = std::move(*texFile);
+    else if (args.command != Command::Doctor || args.texFile)
+        // doctor checks the system even without a document; a document it
+        // was explicitly given must exist, though.
         return std::unexpected(texFile.error());
-    build.texFile = std::move(*texFile);
 
     if (args.engine) {
         auto kind = parseEngineKind(*args.engine);
@@ -182,10 +185,13 @@ std::expected<EffectiveOptions, std::string> assembleOptions(
     out.extras.cleanAll = args.cleanAll;
     out.extras.dryRun = args.dryRun;
     out.extras.noTui = args.noTui;
+    merge(out.extras.installMissing, args.installMissing,
+        config ? config->installMissing : std::nullopt);
 
     // The engine refuses to write into a missing -output-directory, and the
     // state database needs it to exist too. Clean must not create anything.
-    if (out.command != Command::Clean && !build.outputDir.empty()) {
+    if ((out.command == Command::Build || out.command == Command::Watch)
+        && !build.outputDir.empty()) {
         std::error_code ec;
         fs::create_directories(build.outputDir, ec);
         if (ec)

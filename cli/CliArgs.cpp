@@ -14,7 +14,7 @@ std::vector<std::string> normalizeArgv(std::vector<std::string> args)
     if (args.empty())
         return { "build" }; // the document is found in cwd or the config
 
-    static constexpr std::string_view kSubcommands[] = { "build", "watch", "clean" };
+    static constexpr std::string_view kSubcommands[] = { "build", "watch", "clean", "doctor" };
     auto isSubcommand = [](std::string_view arg) {
         return std::ranges::find(kSubcommands, arg) != std::ranges::end(kSubcommands);
     };
@@ -40,6 +40,16 @@ std::vector<std::string> normalizeArgv(std::vector<std::string> args)
 }
 
 namespace {
+
+    void addInstallMissing(CLI::App& sub, CliArgs& out)
+    {
+        sub.add_flag_callback(
+            "--install-missing", [&out] { out.installMissing = true; },
+            "Install missing packages and tools with tlmgr, then rebuild");
+        sub.add_flag_callback(
+            "--no-install-missing", [&out] { out.installMissing = false; },
+            "Only suggest the install command (default)");
+    }
 
     // Options accepted by build and watch alike, bound straight into out.
     void addBuildOptions(CLI::App& sub, CliArgs& out)
@@ -78,6 +88,7 @@ namespace {
         sub.add_option("--max-passes", out.maxPasses,
                "Give up after this many engine passes")
             ->check(CLI::PositiveNumber);
+        addInstallMissing(sub, out);
         sub.add_option("--timeout", out.timeoutSeconds,
                "Kill any engine or tool run that takes longer than this many seconds")
             ->check(CLI::PositiveNumber);
@@ -131,6 +142,12 @@ ParseResult parseCliArgs(const std::vector<std::string>& args)
     clean->add_flag("-n,--dry-run", out.dryRun,
         "Print what would be removed without deleting anything");
 
+    auto* doctor = app.add_subcommand("doctor",
+        "Check that the engines, tools, and packages a build needs are installed");
+    doctor->add_option("file", out.texFile, "Document whose requirements to check too");
+    addCommonOptions(*doctor, out);
+    addInstallMissing(*doctor, out);
+
     try {
         // CLI11's vector overload consumes arguments from the back.
         std::vector<std::string> reversed(args.rbegin(), args.rend());
@@ -146,6 +163,8 @@ ParseResult parseCliArgs(const std::vector<std::string>& args)
         out.command = Command::Watch;
     else if (app.got_subcommand(clean))
         out.command = Command::Clean;
+    else if (app.got_subcommand(doctor))
+        out.command = Command::Doctor;
     else
         out.command = Command::Build;
 

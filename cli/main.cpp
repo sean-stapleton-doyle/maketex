@@ -3,6 +3,7 @@
 #include "EffectiveOptions.h"
 #include "commands/BuildCommand.h"
 #include "commands/CleanCommand.h"
+#include "commands/DoctorCommand.h"
 #include "commands/WatchCommand.h"
 
 #include <exception>
@@ -57,6 +58,8 @@ static int run(int argc, char* argv[])
         return runWatchCommand(*options);
     case Command::Clean:
         return runCleanCommand(*options);
+    case Command::Doctor:
+        return runDoctorCommand(*options);
     }
     return 1;
 }

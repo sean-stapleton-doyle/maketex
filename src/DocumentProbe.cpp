@@ -237,4 +237,99 @@ EngineChoice detectEngine(const fs::path& texFile)
     return { };
 }
 
+namespace {
+
+    // The whole file with comments removed (bounded like the preamble).
+    std::string readSource(const fs::path& file)
+    {
+        std::ifstream in(file);
+        std::string text;
+        std::string line;
+        while (std::getline(in, line) && text.size() < 4 * kMaxPreambleBytes) {
+            text += stripComment(line);
+            text += '\n';
+        }
+        return text;
+    }
+
+    // Options in the [...] before {name} on a \usepackage line, if any.
+    std::string packageOptions(std::string_view text, std::string_view name)
+    {
+        for (auto command : { std::string_view { "\\usepackage" }, std::string_view { "\\RequirePackage" } }) {
+            std::size_t pos = 0;
+            while ((pos = text.find(command, pos)) != std::string_view::npos) {
+                pos += command.size();
+                auto rest = text.substr(pos);
+                if (!rest.starts_with('['))
+                    continue;
+                auto close = rest.find(']');
+                auto brace = rest.find('{', close);
+                auto end = rest.find('}', brace);
+                if (close == std::string_view::npos || brace == std::string_view::npos
+                    || end == std::string_view::npos)
+                    continue;
+                if (rest.substr(brace + 1, end - brace - 1).contains(name))
+                    return std::string(rest.substr(1, close - 1));
+            }
+        }
+        return { };
+    }
+
+} // namespace
+
+DocumentRequirements analyzeRequirements(const fs::path& texFile)
+{
+    DocumentRequirements req;
+    req.engine = detectEngine(texFile);
+
+    // The root plus the files it pulls in directly: chapters often hold
+    // the \bibliography or \printindex.
+    std::string text = readSource(texFile);
+    for (auto command : { std::string_view { "\\input" }, std::string_view { "\\include" } }) {
+        for (const auto& name : argumentsOf(std::string(text), command)) {
+            fs::path child = texFile.parent_path() / trim(name);
+            if (!child.has_extension())
+                child += ".tex";
+            text += readSource(child);
+        }
+    }
+
+    if (auto cls = argumentsOf(text, "\\documentclass"); !cls.empty())
+        req.documentClass = std::string(trim(cls.front()));
+    std::set<std::string> packages;
+    addPackages(packages, text);
+    req.packages.assign(packages.begin(), packages.end());
+
+    auto uses = [&](std::string_view pkg) { return packages.contains(std::string(pkg)); };
+    auto need = [&](std::string program, std::string why) {
+        for (const auto& [p, w] : req.programs)
+            if (p == program)
+                return;
+        req.programs.emplace_back(std::move(program), std::move(why));
+    };
+
+    if (uses("biblatex")) {
+        auto opts = packageOptions(text, "biblatex");
+        if (opts.contains("backend=bibtex"))
+            need("bibtex", "biblatex with backend=bibtex");
+        else
+            need("biber", "loads biblatex");
+    }
+    if (text.contains("\\bibliography{"))
+        need("bibtex", "uses \\bibliography");
+    if (uses("makeidx") || uses("imakeidx") || text.contains("\\makeindex"))
+        need("makeindex", uses("imakeidx") ? "loads imakeidx" : "makes an index");
+    if (uses("glossaries") || uses("glossaries-extra"))
+        need("makeglossaries", uses("glossaries") ? "loads glossaries" : "loads glossaries-extra");
+    if (uses("pythontex"))
+        need("pythontex", "loads pythontex");
+    if (uses("minted")) {
+        need("pygmentize", "loads minted");
+        req.needsShellEscape = true;
+    }
+    if (uses("svg"))
+        req.needsShellEscape = true;
+    return req;
+}
+
 } // namespace maketex

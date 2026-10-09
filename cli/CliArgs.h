@@ -17,6 +17,7 @@ enum class Command {
     Build,
     Watch,
     Clean,
+    Doctor,
 };
 
 // Raw command-line values. Every field the config file can also supply is an
@@ -36,6 +37,7 @@ struct CliArgs {
     std::optional<bool> synctex;
     std::optional<int> maxPasses;
     std::optional<int> timeoutSeconds;
+    std::optional<bool> installMissing;
 
     bool verbose = false;
     bool plain = false;
