@@ -18,7 +18,17 @@ BuildOptions makeOptions()
     return options;
 }
 
-nlohmann::json report(const DriverResult& result)
+// BuildResult has a base class, so it can't take designated initializers.
+BuildResult makeResult(DriverResult driver)
+{
+    BuildResult result;
+    static_cast<DriverResult&>(result) = std::move(driver);
+    if (result.success)
+        result.published.push_back("/proj/main.pdf");
+    return result;
+}
+
+nlohmann::json report(const BuildResult& result)
 {
     std::ostringstream out;
     printJsonReport(result, makeOptions(), out);
@@ -29,7 +39,7 @@ nlohmann::json report(const DriverResult& result)
 
 TEST(JsonReport, successfulBuild)
 {
-    DriverResult result { .success = true, .passes = 2 };
+    auto result = makeResult(DriverResult { .success = true, .passes = 2 });
     auto doc = report(result);
 
     EXPECT_EQ(doc["formatVersion"], 1);
@@ -45,15 +55,39 @@ TEST(JsonReport, successfulBuild)
 
 TEST(JsonReport, upToDateBuild)
 {
-    DriverResult result { .success = true, .passes = 0 };
+    auto result = makeResult(DriverResult { .success = true, .passes = 0, .upToDate = true });
     EXPECT_EQ(report(result)["upToDate"], true);
+}
+
+TEST(JsonReport, toolOnlyRebuildIsNotUpToDate)
+{
+    auto result = makeResult(DriverResult { .success = true, .passes = 0 });
+    EXPECT_EQ(report(result)["upToDate"], false);
+}
+
+TEST(JsonReport, pdfIsNullWhenNothingWasPublished)
+{
+    // e.g. the destination directory is read-only.
+    auto result = makeResult(DriverResult { .success = true, .passes = 1 });
+    result.published.clear();
+    EXPECT_TRUE(report(result)["pdf"].is_null());
+}
+
+TEST(JsonReport, detectedEngineAndReason)
+{
+    auto result = makeResult(DriverResult { .success = true, .passes = 1 });
+    result.engine = EngineKind::LuaLaTeX;
+    result.engineReason = "loads fontspec";
+    auto doc = report(result);
+    EXPECT_EQ(doc["engine"], "lualatex");
+    EXPECT_EQ(doc["engineReason"], "loads fontspec");
 }
 
 TEST(JsonReport, failedBuildCarriesErrorAndNullPdf)
 {
-    DriverResult result { .success = false,
+    auto result = makeResult(DriverResult { .success = false,
         .passes = 1,
-        .lastError = "latex exited with code 1" };
+        .lastError = "latex exited with code 1" });
     auto doc = report(result);
 
     EXPECT_EQ(doc["success"], false);
@@ -63,7 +97,7 @@ TEST(JsonReport, failedBuildCarriesErrorAndNullPdf)
 
 TEST(JsonReport, diagnosticFieldsRoundTrip)
 {
-    DriverResult result { .success = false, .passes = 1 };
+    auto result = makeResult(DriverResult { .success = false, .passes = 1 });
     result.diagnostics.push_back(Diagnostic {
         .severity = Diagnostic::Severity::Error,
         .file = "chapters/ch1.tex",
@@ -97,7 +131,7 @@ TEST(JsonReport, diagnosticFieldsRoundTrip)
 
 TEST(JsonReport, messageWithQuotesAndNewlinesStaysValidJson)
 {
-    DriverResult result { .success = false, .passes = 1 };
+    auto result = makeResult(DriverResult { .success = false, .passes = 1 });
     result.diagnostics.push_back(Diagnostic {
         .message = "File \"weird\".tex\nnot found",
     });

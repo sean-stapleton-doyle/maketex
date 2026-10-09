@@ -14,7 +14,7 @@ namespace maketex::integration {
 
 // Result of one runBuild call plus what the observer saw.
 struct BuildRun {
-    DriverResult result;
+    BuildResult result;
     std::vector<std::string> toolsRun; // in order, one entry per tool run
     bool upToDate = false; // the incremental check skipped the build
 };

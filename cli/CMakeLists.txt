@@ -5,6 +5,7 @@ add_library(maketex_cli_core STATIC
     EffectiveOptions.cpp
     CleanPlan.cpp
     FileWatcher.cpp
+    PackageHints.cpp
     render/InlineReport.cpp
     render/JsonReport.cpp
     render/GithubReport.cpp

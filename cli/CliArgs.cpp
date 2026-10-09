@@ -10,15 +10,30 @@ namespace maketex::cli {
 std::vector<std::string> normalizeArgv(std::vector<std::string> args)
 {
     if (args.empty())
-        return { "build" }; // config `main` may still name the document
+        return { "build" }; // the document is found in cwd or the config
+
+    static constexpr std::string_view kSubcommands[] = { "build", "watch", "clean" };
+    auto isSubcommand = [](std::string_view arg) {
+        return std::ranges::find(kSubcommands, arg) != std::ranges::end(kSubcommands);
+    };
 
     const std::string& first = args.front();
-    static constexpr std::string_view kSubcommands[] = { "build", "watch", "clean" };
-    bool isSubcommand = std::ranges::find(kSubcommands, first) != std::ranges::end(kSubcommands);
-    bool isGlobalFlag = first == "--help" || first == "-h" || first == "--version";
-
-    if (!isSubcommand && !isGlobalFlag)
-        args.insert(args.begin(), "build");
+    if (first == "help")
+        return { "--help" };
+    if (isSubcommand(first) || first == "--help" || first == "-h" || first == "--version")
+        return args;
+    // Flags before the subcommand (`maketex --plain watch`): move it to the
+    // front. Only the first non-flag counts — any later word is the
+    // document, so `maketex paper watch` stays a build of paper.
+    auto firstNonFlag = std::ranges::find_if(args,
+        [](const std::string& a) { return !a.starts_with('-'); });
+    if (firstNonFlag != args.end() && isSubcommand(*firstNonFlag)) {
+        auto sub = std::move(*firstNonFlag);
+        args.erase(firstNonFlag);
+        args.insert(args.begin(), std::move(sub));
+        return args;
+    }
+    args.insert(args.begin(), "build");
     return args;
 }
 
@@ -39,17 +54,30 @@ namespace {
             "(biber,bibtex,makeindex,makeglossaries,pythontex)");
         sub.add_option("-o,--output-dir", out.outputDir,
             "Directory for build outputs and the state database");
+        // Every boolean has both spellings so a flag can undo the config.
+        sub.add_flag_callback(
+            "--halt-on-error", [&out] { out.haltOnError = true; },
+            "Stop at the first TeX error (default)");
         sub.add_flag_callback(
             "--no-halt-on-error", [&out] { out.haltOnError = false; },
             "Keep compiling past TeX errors");
         sub.add_flag_callback(
             "--shell-escape", [&out] { out.shellEscape = true; },
-            "Enable \\write18 shell escapes");
+            "Enable \\write18 shell escapes (minted, svg, ...)");
+        sub.add_flag_callback(
+            "--no-shell-escape", [&out] { out.shellEscape = false; },
+            "Disable shell escapes (default)");
         sub.add_flag_callback(
             "--synctex", [&out] { out.synctex = true; },
-            "Generate SyncTeX data");
+            "Generate SyncTeX data (default)");
+        sub.add_flag_callback(
+            "--no-synctex", [&out] { out.synctex = false; },
+            "Skip SyncTeX data");
         sub.add_option("--max-passes", out.maxPasses,
                "Give up after this many engine passes")
+            ->check(CLI::PositiveNumber);
+        sub.add_option("--timeout", out.timeoutSeconds,
+               "Kill any engine or tool run that takes longer than this many seconds")
             ->check(CLI::PositiveNumber);
     }
 

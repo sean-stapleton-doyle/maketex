@@ -261,7 +261,7 @@ TEST_F(EngineBaseTest, runReturnsZeroExitAndCapturesStdout)
     EngineInvocation inv;
     inv.texFile = "hello.tex";
 
-    auto result = engine.run(inv);
+    auto result = engine.run(inv, { });
 
     EXPECT_EQ(result.exitCode, 0);
     EXPECT_EQ(result.stdoutOutput, "hello.tex\n");
@@ -282,7 +282,7 @@ TEST_F(EngineBaseTest, runPropagatesNonZeroExit)
     };
 
     FalseEngine engine;
-    auto result = engine.run(EngineInvocation { });
+    auto result = engine.run(EngineInvocation { }, { });
     EXPECT_EQ(result.exitCode, 1);
 }
 
@@ -314,7 +314,7 @@ TEST_F(EngineBaseTest, runSetsLogWidthEnvironment)
     };
 
     EnvEngine engine;
-    auto result = engine.run(EngineInvocation { });
+    auto result = engine.run(EngineInvocation { }, { });
     EXPECT_EQ(result.exitCode, 0);
     EXPECT_EQ(result.stdoutOutput, "10000\n");
 }

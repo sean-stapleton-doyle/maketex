@@ -2,12 +2,16 @@
 
 #include "maketex/BuildDriver.h"
 #include "maketex/BuildEvent.h"
+#include "maketex/DocumentProbe.h"
 #include "maketex/EngineArguments.h"
 #include "maketex/ToolFactory.h"
 #include "maketex/engines/EngineFactory.h"
 
+#include <chrono>
 #include <filesystem>
 #include <optional>
+#include <stop_token>
+#include <string>
 #include <vector>
 
 namespace maketex {
@@ -25,7 +29,9 @@ std::vector<std::filesystem::path> texSystemRoots();
 struct BuildOptions {
     std::filesystem::path texFile; // absolute path to the root .tex file
 
-    EngineKind engine = EngineKind::PdfLaTeX;
+    // The engine to drive; unset means detect it from the document (see
+    // chooseEngine).
+    std::optional<EngineKind> engine;
     EngineArguments engineArguments;
 
     // Auxiliary tools eligible to run between engine passes, in this order.
@@ -59,20 +65,52 @@ struct BuildOptions {
 
     bool haltOnError = true;
     bool shellEscape = false;
-    bool synctex = false;
+    // On by default: editors use it for source↔PDF jumps, and it costs
+    // little. Also keeps `maketex` and `maketex watch` on one fingerprint.
+    bool synctex = true;
     int maxPasses = BuildDriver::kDefaultMaxPasses;
 
     // Receives progress events (pass/tool start and finish) on the calling
     // thread when set. See BuildEvent.h.
     BuildObserver observer;
+
+    // Stops the build: the running engine or tool is terminated and
+    // runBuild returns a failed result ("cancelled"). Watch mode uses it to
+    // quit without waiting for the build to converge.
+    std::stop_token stopToken;
+    // Kill any single engine or tool run that takes longer than this (a
+    // wedged shell-escape command, a tool waiting for input). Unset: no limit.
+    std::optional<std::chrono::seconds> processTimeout;
+};
+
+// The engine a build of options would use: options.engine when set, else
+// what the document asks for (detectEngine: "% !TeX program", then its
+// preamble packages), else pdflatex.
+EngineChoice chooseEngine(const BuildOptions& options);
+
+// What runBuild did, on top of the driver's result.
+struct BuildResult : DriverResult {
+    EngineKind engine = EngineKind::PdfLaTeX; // the engine the build used
+    // Why that engine, when it was detected rather than set: "loads
+    // fontspec", "% !TeX program", … Empty for an explicit or default choice.
+    std::string engineReason;
+    // The detected engine failed and the build was redone with `engine`;
+    // a caller building repeatedly (watch) should keep using it.
+    bool retriedEngine = false;
+    // Final artifacts at their user-facing location: the published copies
+    // beside the tex file, or the PDF in an explicit output directory.
+    // Empty unless the build succeeded.
+    std::vector<std::filesystem::path> published;
 };
 
 // Assembles the full build — engine, state database, hasher, and the default
 // auxiliary tool roster (biber, bibtex, makeindex, makeglossaries, pythontex)
-// — and drives it to convergence. Environment failures (engine not
-// installed, database errors) propagate as exceptions from the underlying
-// components.
-DriverResult runBuild(const BuildOptions& options);
+// — and drives it to convergence. When the engine was detected as pdflatex
+// and the build fails because the document needs a Unicode engine, it is
+// retried once with that engine (an Info diagnostic says so). Environment
+// failures (engine not installed, database errors) propagate as exceptions
+// from the underlying components.
+BuildResult runBuild(const BuildOptions& options);
 
 // Copies jobName.pdf (and jobName.synctex.gz when present) from outDir to
 // destDir via a temp file + rename, so readers never observe a half-written

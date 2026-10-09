@@ -16,19 +16,6 @@ using namespace ftxui;
 
 namespace maketex::cli {
 
-std::string_view engineKindName(EngineKind kind)
-{
-    switch (kind) {
-    case EngineKind::PdfLaTeX:
-        return "pdflatex";
-    case EngineKind::XeLaTeX:
-        return "xelatex";
-    case EngineKind::LuaLaTeX:
-        return "lualatex";
-    }
-    return "latex";
-}
-
 bool useStyledOutput(bool plainFlag)
 {
     return !plainFlag && isatty(STDOUT_FILENO) == 1
@@ -76,15 +63,15 @@ Element diagnosticRow(const Diagnostic& diagnostic, bool verbose)
             text(std::format("  {:>4} │ ", diagnostic.line)) | dim,
             text(std::move(*snippet)));
 
-    if (!verbose || diagnostic.rawContext.empty()) {
-        if (!snippetRow)
-            return row;
-        return vbox(row, std::move(snippetRow));
-    }
-
     Elements lines { row };
     if (snippetRow)
         lines.push_back(std::move(snippetRow));
+    if (!diagnostic.hint.empty())
+        lines.push_back(hbox(text("  hint: ") | color(Color::Cyan),
+            paragraph(diagnostic.hint)));
+    if (!verbose || diagnostic.rawContext.empty())
+        return lines.size() == 1 ? row : vbox(std::move(lines));
+
     std::string_view context = diagnostic.rawContext;
     while (!context.empty()) {
         auto newline = context.find('\n');
@@ -98,7 +85,15 @@ Element diagnosticRow(const Diagnostic& diagnostic, bool verbose)
     return vbox(std::move(lines));
 }
 
-Element buildReport(const DriverResult& result, const BuildOptions& options,
+std::string engineLabel(EngineKind engine, const std::string& reason)
+{
+    std::string label(engineKindName(engine));
+    if (!reason.empty())
+        label += " (" + reason + ")";
+    return label;
+}
+
+Element buildReport(const BuildResult& result, const BuildOptions& options,
     bool verbose)
 {
     Elements rows;
@@ -106,16 +101,20 @@ Element buildReport(const DriverResult& result, const BuildOptions& options,
     rows.push_back(hbox(text("maketex ") | bold,
         text(options.texFile.filename().string()),
         text("  ·  ") | dim,
-        text(std::string(engineKindName(options.engine))) | dim));
+        text(engineLabel(result.engine, result.engineReason)) | dim));
 
     for (const auto& diagnostic : result.diagnostics)
         rows.push_back(diagnosticRow(diagnostic, verbose));
 
     std::string passes = std::format("{} pass{}", result.passes,
         result.passes == 1 ? "" : "es");
-    if (result.success && result.passes == 0) {
+    if (result.upToDate) {
         rows.push_back(hbox(text("✓ ") | color(Color::Green) | bold,
             text("up to date") | color(Color::Green)));
+    } else if (result.success && result.passes == 0) {
+        rows.push_back(hbox(text("✓ ") | color(Color::Green) | bold,
+            text("built") | color(Color::Green),
+            text("  ·  tools only, no engine pass needed") | dim));
     } else if (result.success) {
         rows.push_back(hbox(text("✓ ") | color(Color::Green) | bold,
             text("built") | color(Color::Green),

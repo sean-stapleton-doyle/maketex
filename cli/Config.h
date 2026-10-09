@@ -26,6 +26,7 @@ struct Config {
     std::optional<bool> synctex;
     std::optional<bool> haltOnError;
     std::optional<int> maxPasses;
+    std::optional<int> timeoutSeconds;
 
     std::optional<int> watchIntervalMs;
     std::vector<std::filesystem::path> watchExtraPaths;
@@ -35,7 +36,8 @@ struct Config {
     std::filesystem::path sourceFile;
 };
 
-// Nearest maketex.toml in startDir or any parent, or nullopt.
+// Nearest maketex.toml in startDir or a parent, or nullopt. The search
+// stops at the repository root (.git/.hg/.svn) and before $HOME.
 std::optional<std::filesystem::path> findConfigFile(
     const std::filesystem::path& startDir);
 

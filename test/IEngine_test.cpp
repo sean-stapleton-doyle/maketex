@@ -9,7 +9,7 @@ using namespace maketex;
 namespace {
 
 struct MockEngine : public IEngine {
-    RunResult<EngineInvocation> run(const EngineInvocation& inv) override
+    RunResult<EngineInvocation> run(const EngineInvocation& inv, const maketex::WaitLimits&) override
     {
         return RunResult<EngineInvocation> { .invocation = inv, .exitCode = 0 };
     }
@@ -30,6 +30,6 @@ TEST(IEngine, mockRunReturnsSuccess)
 {
     MockEngine engine;
     EngineInvocation inv { .texFile = "/a/main.tex", .outputDir = "/a" };
-    auto result = engine.run(inv);
+    auto result = engine.run(inv, { });
     EXPECT_TRUE(result.success());
 }

@@ -25,7 +25,8 @@ public:
     {
     }
 
-    RunResult<EngineInvocation> run(const EngineInvocation& inv) override;
+    RunResult<EngineInvocation> run(const EngineInvocation& inv,
+        const WaitLimits& limits) override;
 
     // Returns the full argv for the engine invocation.
     // argv[0] is looked up via PATH.

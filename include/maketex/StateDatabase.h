@@ -43,10 +43,16 @@ struct StateDbConfig {
     // different checkout path still hits. Empty stores paths verbatim.
     std::filesystem::path projectRoot;
 
-    // Build-options fingerprint (engine, tools, flags). A stored database
-    // whose fingerprint differs is wiped — its hashes were recorded under
-    // different build semantics. Empty skips the comparison.
+    // Build-options fingerprint (engine, tools, flags). When it differs from
+    // the one stored for jobName, that job's rule records are dropped —
+    // they were recorded under different build semantics. Empty skips the
+    // comparison.
     std::string fingerprint;
+    // The document the fingerprint belongs to. Documents sharing an output
+    // directory share the database; each keeps its own fingerprint so
+    // building one with different options leaves the others' state alone.
+    // Empty treats the fingerprint as database-wide.
+    std::string jobName;
 };
 
 // Wraps all SQL operations against the maketex state database.
@@ -65,7 +71,8 @@ public:
         const StateDbConfig& config = { });
 
     // True when incompatible prior state was dropped during construction —
-    // the caller may want to tell the user why this build runs cold.
+    // the whole database, or the job's rules — so the caller may want to
+    // tell the user why this build runs cold.
     bool wasReset() const { return m_wasReset; }
 
     // File state ──────────────────────────────────────────────────────────────
@@ -96,7 +103,8 @@ public:
 
 private:
     void applySchema();
-    void resetIncompatibleState(const std::string& fingerprint);
+    void resetIncompatibleState(const std::string& fingerprint,
+        const std::string& jobName);
     std::optional<std::string> getMeta(const std::string& key) const;
     void setMeta(const std::string& key, const std::string& value);
 

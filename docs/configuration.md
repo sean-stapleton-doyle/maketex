@@ -10,8 +10,11 @@ repeating them.
 1. `--config <path>` uses exactly that file (and errors if it is missing).
 2. Otherwise maketex starts in the directory of the `.tex` file given on the
    command line — or the current directory when no file was given — and walks
-   up toward the filesystem root. The first `maketex.toml` found wins; files
-   in higher directories are not merged.
+   up toward the repository root. The first `maketex.toml` found wins; files
+   in higher directories are not merged. The search stops at the first
+   directory containing `.git`, `.hg`, or `.svn`, and never reads a
+   `maketex.toml` in your home directory, so a stray config can't redirect
+   builds of unrelated documents.
 3. `--no-config` skips the search entirely.
 
 Relative paths inside the config (`main`, `output-dir`, `watch.extra-paths`)
@@ -24,8 +27,8 @@ Per field: **command-line flag > config value > built-in default.**
 
 Unknown keys produce a warning naming the file, line, and key, but do not
 fail the build — older maketex versions stay usable with newer configs.
-Type errors and invalid values (an unknown engine name, a non-positive
-`max-passes`) are hard errors.
+Type errors and invalid values (an unknown engine name, a `max-passes` or
+`timeout` that isn't a positive integer) are hard errors.
 
 ## Schema
 
@@ -37,7 +40,8 @@ noted.
 # `maketex` with no arguments builds this.
 main = "thesis.tex"
 
-# TeX engine: "pdflatex" (default), "xelatex", or "lualatex".
+# TeX engine: "pdflatex", "xelatex", or "lualatex". Default: detected from
+# the document (see USAGE.md, "Choosing the engine").
 engine = "lualatex"
 
 # Where outputs and the .maketex.db state database go. Created if missing.
@@ -54,7 +58,7 @@ tools = ["biber", "makeindex"]
 # Enable \write18 shell escapes. Default: false.
 shell-escape = false
 
-# Generate SyncTeX data. Default: false.
+# Generate SyncTeX data. Default: true.
 synctex = true
 
 # Stop at the first TeX error instead of compiling past it. Default: true.
@@ -63,6 +67,10 @@ halt-on-error = true
 # Give up if the build has not converged after this many engine passes.
 # Default: 8.
 max-passes = 8
+
+# Stop any single engine or tool run after this many seconds. Default: no
+# limit.
+timeout = 300
 
 [engine-args]
 # Executable to spawn instead of the engine's default binary name.
@@ -94,10 +102,11 @@ extra-extensions = [".tikz-cache"]
 | `engine-args.extra-options` | `--engine-opt` (repeatable) |
 | `tools` | `--tools a,b,c` |
 | `output-dir` | `-o` / `--output-dir` |
-| `shell-escape` | `--shell-escape` |
-| `synctex` | `--synctex` |
-| `halt-on-error` | `--no-halt-on-error` |
+| `shell-escape` | `--shell-escape` / `--no-shell-escape` |
+| `synctex` | `--synctex` / `--no-synctex` |
+| `halt-on-error` | `--halt-on-error` / `--no-halt-on-error` |
 | `max-passes` | `--max-passes` |
+| `timeout` | `--timeout` |
 | `watch.interval-ms` | `--interval-ms` (watch only) |
 | `watch.extra-paths` | — (config only) |
 | `clean.extra-extensions` | — (config only) |

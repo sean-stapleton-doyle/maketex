@@ -119,6 +119,19 @@ TEST(ParseConfig, nonPositiveMaxPassesFails)
     EXPECT_FALSE(parseConfig("max-passes = 0\n", kSource).has_value());
 }
 
+TEST(ParseConfig, hugeMaxPassesFailsInsteadOfWrapping)
+{
+    // 2^32 + 1 used to narrow to 1.
+    EXPECT_FALSE(parseConfig("max-passes = 4294967297\n", kSource).has_value());
+}
+
+TEST(ParseConfig, timeoutIsRead)
+{
+    auto config = parseConfig("timeout = 120\n", kSource);
+    ASSERT_TRUE(config.has_value()) << config.error();
+    EXPECT_EQ(config->timeoutSeconds, 120);
+}
+
 TEST(ParseConfig, tomlSyntaxErrorFails)
 {
     auto config = parseConfig("main = \n", kSource);
@@ -154,4 +167,28 @@ TEST_F(FindConfigFileTest, prefersTheClosestConfig)
     auto found = findConfigFile(m_dir / "a" / "b");
     ASSERT_TRUE(found.has_value());
     EXPECT_EQ(*found, m_dir / "a" / "maketex.toml");
+}
+
+TEST_F(FindConfigFileTest, stopsAtTheRepositoryRoot)
+{
+    // A config above the repository belongs to some other project.
+    fs::create_directories(m_dir / "repo" / ".git");
+    fs::create_directories(m_dir / "repo" / "paper");
+    std::ofstream(m_dir / "maketex.toml") << "";
+
+    EXPECT_FALSE(findConfigFile(m_dir / "repo" / "paper").has_value());
+}
+
+TEST_F(FindConfigFileTest, neverReadsTheHomeDirectory)
+{
+    fs::create_directories(m_dir / "home" / "paper");
+    std::ofstream(m_dir / "home" / "maketex.toml") << "main = \"other.tex\"\n";
+    const char* savedHome = std::getenv("HOME");
+    std::string saved = savedHome ? savedHome : "";
+    ::setenv("HOME", (m_dir / "home").c_str(), 1);
+
+    auto found = findConfigFile(m_dir / "home" / "paper");
+    ::setenv("HOME", saved.c_str(), 1);
+
+    EXPECT_FALSE(found.has_value());
 }

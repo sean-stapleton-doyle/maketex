@@ -29,6 +29,7 @@ struct CliArgs {
     std::optional<bool> shellEscape;
     std::optional<bool> synctex;
     std::optional<int> maxPasses;
+    std::optional<int> timeoutSeconds;
 
     bool verbose = false;
     bool plain = false;

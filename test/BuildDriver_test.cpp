@@ -104,7 +104,7 @@ public:
     {
     }
 
-    RunResult<EngineInvocation> run(const EngineInvocation& inv) override
+    RunResult<EngineInvocation> run(const EngineInvocation& inv, const maketex::WaitLimits&) override
     {
         if (m_index >= static_cast<int>(m_calls.size()))
             throw std::out_of_range("FakeEngine: no more calls configured");
@@ -798,6 +798,29 @@ TEST_F(BuildDriverTest, scratchOutputDeletedByEngineDoesNotBlockSkip)
 
     EXPECT_TRUE(res.success) << res.lastError;
     EXPECT_EQ(res.passes, 0);
+}
+
+TEST_F(BuildDriverTest, missingToolBinaryIsADiagnosticNotACrash)
+{
+    // On BasicTeX, biber/makeglossaries are often absent: the build must
+    // fail with a clear "not installed" diagnostic, not an exception.
+    class MissingTool : public FakeTool {
+    public:
+        using FakeTool::FakeTool;
+        std::vector<std::string> buildArgs(const ToolInvocation&) const override
+        {
+            return { "maketex-no-such-tool-xyz" };
+        }
+    };
+    FakeEngine engine({ triggerPass("bcf v1\n") });
+    MissingTool tool(m_dir / "main.bcf", m_dir / "main.bbl");
+    auto res = BuildDriver(engine, m_db, m_hasher, makeInv(), { .tools = { &tool } }).run();
+
+    ASSERT_FALSE(res.success);
+    EXPECT_NE(res.lastError.find("not installed"), std::string::npos) << res.lastError;
+    ASSERT_EQ(res.diagnostics.size(), 1u);
+    EXPECT_EQ(res.diagnostics[0].category, "missing-tool");
+    EXPECT_EQ(res.diagnostics[0].missingFile, "maketex-no-such-tool-xyz");
 }
 
 TEST_F(BuildDriverTest, zeroMaxPassesIsAnError)

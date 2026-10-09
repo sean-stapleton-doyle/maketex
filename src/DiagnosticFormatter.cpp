@@ -27,6 +27,8 @@ void format(const std::vector<Diagnostic>& diagnostics, std::ostream& out,
         }
 
         out << ": " << d.message << "\n";
+        if (!d.hint.empty())
+            out << "  hint: " << d.hint << "\n";
 
         if (verbosity == Verbosity::Verbose && !d.rawContext.empty())
             out << d.rawContext << "\n";

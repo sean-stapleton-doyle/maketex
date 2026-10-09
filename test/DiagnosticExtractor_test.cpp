@@ -371,3 +371,90 @@ TEST_F(DiagnosticAttributionTest, rootDocumentSourcePathIsResolved)
     EXPECT_EQ(diags[0].file, "main.tex");
     EXPECT_TRUE(std::filesystem::equivalent(diags[0].sourcePath, m_dir / "main.tex"));
 }
+
+// ── Missing packages, fatal noise, and hints ─────────────────────────────────
+
+TEST(DiagnosticExtractor, packageErrorContinuationLinesAreFolded)
+{
+    auto diags = diagnostics::extract(latexResult(
+        "./main.tex:24: Package fontspec Error: \n"
+        "(fontspec)                The font \"Latin Modern Roman\" cannot be found;\n"
+        "(fontspec)                this may be but usually is not a fontspec bug.\n"
+        "\n"
+        "l.24 \\setmainfont{Latin Modern Roman}\n",
+        1));
+    ASSERT_EQ(diags.size(), 1u);
+    EXPECT_EQ(diags[0].message,
+        "Package fontspec Error: The font \"Latin Modern Roman\" cannot be found; "
+        "this may be but usually is not a fontspec bug");
+}
+
+TEST(DiagnosticExtractor, emergencyStopIsDroppedWhenThereIsARealError)
+{
+    auto diags = diagnostics::extract(latexResult(
+        "./main.tex:3: LaTeX Error: File `minted.sty' not found.\n"
+        "./main.tex:5: Emergency stop.\n"
+        "!  ==> Fatal error occurred, no output PDF file produced!\n",
+        1));
+    ASSERT_EQ(diags.size(), 1u);
+    EXPECT_EQ(diags[0].category, "missing-file");
+    EXPECT_EQ(diags[0].missingFile, "minted.sty");
+}
+
+TEST(DiagnosticExtractor, nextFileLineErrorEndsTheContext)
+{
+    auto diags = diagnostics::extract(latexResult(
+        "./main.tex:3: Undefined control sequence.\n"
+        "./main.tex:9: Missing $ inserted.\n",
+        1));
+    ASSERT_EQ(diags.size(), 2u);
+    EXPECT_EQ(diags[0].rawContext.find("Missing $"), std::string::npos);
+}
+
+TEST(DiagnosticExtractor, shellEscapeErrorCarriesAHint)
+{
+    auto diags = diagnostics::extract(latexResult(
+        "./main.tex:20: Package minted Error: You must invoke LaTeX with the -shell-escape flag.\n",
+        1));
+    ASSERT_EQ(diags.size(), 1u);
+    EXPECT_EQ(diags[0].category, "shell-escape-required");
+    EXPECT_NE(diags[0].hint.find("--shell-escape"), std::string::npos);
+}
+
+TEST(DiagnosticExtractor, cantFindFileIsMissingFile)
+{
+    auto diags = diagnostics::extract(latexResult(
+        "! I can't find file `chapter'.\nl.7 \\input{chapter}\n", 1));
+    ASSERT_FALSE(diags.empty());
+    EXPECT_EQ(diags[0].category, "missing-file");
+    EXPECT_EQ(diags[0].missingFile, "chapter");
+}
+
+TEST(DiagnosticExtractor, missingProgramIsMissingTool)
+{
+    RunResult<ToolInvocation> result {
+        .kind = InvokerKind::Biber,
+        .exitCode = 127,
+        .program = "biber",
+        .notFound = true,
+    };
+    auto diags = diagnostics::extract(result);
+    ASSERT_EQ(diags.size(), 1u);
+    EXPECT_EQ(diags[0].category, "missing-tool");
+    EXPECT_EQ(diags[0].missingFile, "biber");
+}
+
+TEST_F(DiagnosticAttributionTest, missingPackageIsAttributedToItsUsepackageLine)
+{
+    // TeX gives up at a later line (where the package's macro is used, or
+    // \begin{document}); the user needs the \usepackage line.
+    writeFile("main.tex",
+        "\\documentclass{article}\n"
+        "\\usepackage{amsmath}\n"
+        "\\usepackage[backend=biber]{biblatex, csquotes}\n"
+        "\\addbibresource{refs.bib}\n");
+    auto diags = diagnostics::extract(resultIn(
+        "./main.tex:4: LaTeX Error: File `biblatex.sty' not found.\n", 1));
+    ASSERT_EQ(diags.size(), 1u);
+    EXPECT_EQ(diags[0].line, 3);
+}

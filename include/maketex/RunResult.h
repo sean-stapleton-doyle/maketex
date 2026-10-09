@@ -18,6 +18,10 @@ struct RunResult {
     int exitCode = 0;
     std::string stdoutOutput;
     std::string stderrOutput;
+    std::string program; // argv[0], for messages
+    bool notFound = false; // argv[0] is not installed (not on PATH)
+    bool timedOut = false; // killed after WaitLimits::timeout
+    bool cancelled = false; // killed because the build was cancelled
 
     bool success() const { return exitCode == 0; }
 };

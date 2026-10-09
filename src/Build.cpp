@@ -1,6 +1,7 @@
 #include "maketex/Build.h"
 
 #include "maketex/Blake3Hasher.h"
+#include "maketex/DocumentProbe.h"
 #include "maketex/EngineInvocation.h"
 #include "maketex/ITool.h"
 #include "maketex/Process.h"
@@ -11,6 +12,10 @@
 
 #include <SQLiteCpp/SQLiteCpp.h>
 
+#include <algorithm>
+#include <array>
+#include <format>
+#include <fstream>
 #include <memory>
 #include <optional>
 #include <string>
@@ -133,70 +138,209 @@ namespace {
 
 } // namespace
 
-DriverResult runBuild(const BuildOptions& options)
-{
-    auto [engineArguments, jobName] = splitJobName(options.engineArguments);
-    auto engine = createEngine(options.engine, engineArguments);
+namespace {
 
-    fs::path outDir = options.resolvedOutputDir();
-    fs::create_directories(outDir);
-    fs::path dbPath = outDir / ".maketex.db";
+    // \include{chapters/one} makes the engine write chapters/one.aux under
+    // -output-directory, and TeX cannot create directories: mirror every
+    // source directory that holds .tex files into the output directory.
+    void mirrorSourceDirectories(const fs::path& texDir, const fs::path& outDir)
+    {
+        std::error_code ec;
+        if (fs::equivalent(texDir, outDir, ec))
+            return;
+        auto outCanonical = fs::weakly_canonical(outDir, ec);
+        // Bounded: running in a huge directory (a home dir) must stay cheap.
+        constexpr int kMaxEntries = 20000;
+        int seen = 0;
+        fs::recursive_directory_iterator it(texDir,
+            fs::directory_options::skip_permission_denied, ec);
+        for (; !ec && it != fs::recursive_directory_iterator(); it.increment(ec)) {
+            if (++seen > kMaxEntries)
+                break;
+            const auto& entry = *it;
+            auto name = entry.path().filename().string();
+            if (entry.is_directory(ec)) {
+                // Hidden dirs (.git, .maketex), the output dir, and
+                // dependency trees never hold \include'd chapters.
+                if (name.starts_with('.') || name == "node_modules"
+                    || fs::weakly_canonical(entry.path(), ec) == outCanonical)
+                    it.disable_recursion_pending();
+                continue;
+            }
+            if (entry.path().extension() != ".tex")
+                continue;
+            auto rel = fs::relative(entry.path().parent_path(), texDir, ec);
+            if (!ec && !rel.empty() && rel != ".")
+                fs::create_directories(outDir / rel, ec);
+        }
+    }
 
-    Blake3Hasher hasher;
+    // The default output directory is maketex's own scratch space; keep it
+    // out of version control without the user having to say so.
+    void ignoreInVersionControl(const fs::path& outDir)
+    {
+        auto gitignore = outDir / ".gitignore";
+        std::error_code ec;
+        if (!fs::exists(gitignore, ec))
+            std::ofstream(gitignore) << "# Created by maketex: build outputs and state.\n*\n";
+    }
 
-    std::vector<std::unique_ptr<ITool>> tools;
-    tools.reserve(options.tools.size());
-    for (ToolKind kind : options.tools)
-        tools.push_back(createTool(kind));
+    // Whether a failed pdflatex build failed because the document needs a
+    // Unicode engine (fontspec, unicode-math, … loaded where the preamble
+    // scan could not see them, e.g. from a custom class).
+    std::optional<EngineKind> unicodeEngineNeeded(const DriverResult& result)
+    {
+        for (const auto& d : result.diagnostics) {
+            const auto& m = d.message;
+            // Matched on a prefix: fontspec's message continues on a
+            // "(fontspec)" line ("… requires either XeTeX or\n LuaTeX.").
+            if (m.contains("requires either XeTeX or") || m.contains("XeLaTeX or LuaLaTeX")
+                || m.contains("Cannot be run with pdfLaTeX") || m.contains("requires LuaTeX"))
+                return EngineKind::LuaLaTeX;
+            if (m.contains("requires XeTeX") || m.contains("XeTeX is required"))
+                return EngineKind::XeLaTeX;
+        }
+        return std::nullopt;
+    }
 
-    auto db = std::make_unique<SQLite::Database>(
-        dbPath.string(), SQLite::OPEN_READWRITE | SQLite::OPEN_CREATE);
-    StateDatabase stateDb(std::move(db),
-        StateDbConfig {
-            .projectRoot = options.texFile.parent_path(),
-            .fingerprint = buildFingerprint(options, engine->name(), tools),
-        });
+    BuildResult buildWith(const BuildOptions& options, EngineKind engineKind)
+    {
+        auto [engineArguments, jobName] = splitJobName(options.engineArguments);
+        auto engine = createEngine(engineKind, engineArguments);
 
-    std::vector<ITool*> toolPtrs;
-    toolPtrs.reserve(tools.size());
-    for (auto& t : tools)
-        toolPtrs.push_back(t.get());
+        fs::path outDir = options.resolvedOutputDir();
+        fs::create_directories(outDir);
+        if (options.usesDefaultOutputDir())
+            ignoreInVersionControl(outDir);
+        mirrorSourceDirectories(options.texFile.parent_path(), outDir);
+        fs::path dbPath = outDir / ".maketex.db";
 
-    EngineInvocation inv {
-        .texFile = options.texFile,
-        .outputDir = outDir,
-        .jobName = jobName,
-        .haltOnError = options.haltOnError,
-        .shellEscape = options.shellEscape,
-        .synctex = options.synctex,
-    };
+        Blake3Hasher hasher;
 
-    BuildDriver driver(*engine, stateDb, hasher, inv,
-        BuildDriver::Config {
-            .maxPasses = options.maxPasses,
-            .tools = std::move(toolPtrs),
-            .ignorePrefixes = texSystemRoots(),
-            .observer = options.observer,
-        });
-    auto result = driver.run();
+        std::vector<std::unique_ptr<ITool>> tools;
+        tools.reserve(options.tools.size());
+        for (ToolKind kind : options.tools)
+            tools.push_back(createTool(kind));
 
-    if (stateDb.wasReset())
-        result.diagnostics.insert(result.diagnostics.begin(),
-            Diagnostic {
-                .severity = Diagnostic::Severity::Info,
-                .message = "stored build state was incompatible "
-                           "(different maketex version or build options) — "
-                           "started from a full rebuild",
+        EngineInvocation inv {
+            .texFile = options.texFile,
+            .outputDir = outDir,
+            .jobName = jobName,
+            .haltOnError = options.haltOnError,
+            .shellEscape = options.shellEscape,
+            .synctex = options.synctex,
+        };
+
+        auto db = std::make_unique<SQLite::Database>(
+            dbPath.string(), SQLite::OPEN_READWRITE | SQLite::OPEN_CREATE);
+        StateDatabase stateDb(std::move(db),
+            StateDbConfig {
+                .projectRoot = options.texFile.parent_path(),
+                .fingerprint = buildFingerprint(options, engine->name(), tools),
+                .jobName = inv.resolvedJobName(),
             });
 
-    // Unconditional on success — also after an up-to-date skip, which covers
-    // a published PDF the user deleted while the build state stayed current.
-    if (result.success && options.usesDefaultOutputDir())
-        publishArtifacts(outDir, options.texFile.parent_path(),
-            inv.resolvedJobName());
+        std::vector<ITool*> toolPtrs;
+        toolPtrs.reserve(tools.size());
+        for (auto& t : tools)
+            toolPtrs.push_back(t.get());
 
+        BuildDriver driver(*engine, stateDb, hasher, inv,
+            BuildDriver::Config {
+                .maxPasses = options.maxPasses,
+                .tools = std::move(toolPtrs),
+                .ignorePrefixes = texSystemRoots(),
+                .observer = options.observer,
+                .processLimits = WaitLimits {
+                    .timeout = options.processTimeout,
+                    .stop = options.stopToken,
+                },
+            });
+        BuildResult result;
+        static_cast<DriverResult&>(result) = driver.run();
+        result.engine = engineKind;
+
+        if (stateDb.wasReset())
+            result.diagnostics.insert(result.diagnostics.begin(),
+                Diagnostic {
+                    .severity = Diagnostic::Severity::Info,
+                    .message = "stored build state was incompatible "
+                               "(different maketex version or build options) — "
+                               "started from a full rebuild",
+                });
+
+        // Unconditional on success — also after an up-to-date skip, which
+        // covers a published PDF the user deleted while the build state
+        // stayed current.
+        if (result.success && options.usesDefaultOutputDir())
+            result.published = publishArtifacts(outDir, options.texFile.parent_path(),
+                inv.resolvedJobName());
+        else if (result.success)
+            result.published.push_back(inv.jobFile(".pdf"));
+        return result;
+    }
+
+} // namespace
+
+EngineChoice chooseEngine(const BuildOptions& options)
+{
+    if (options.engine)
+        return { .kind = *options.engine, .reason = "" };
+    return detectEngine(options.texFile);
+}
+
+BuildResult runBuild(const BuildOptions& options)
+{
+    auto choice = chooseEngine(options);
+    auto result = buildWith(options, choice.kind);
+    result.engineReason = choice.reason;
+
+    // The preamble scan cannot see packages a custom class or style loads.
+    // When the guess was plain pdflatex and the engine said why that was
+    // wrong, retry once with the engine it asked for.
+    bool guessed = !options.engine && choice.kind == EngineKind::PdfLaTeX;
+    if (!result.success && guessed) {
+        if (auto needed = unicodeEngineNeeded(result)) {
+            auto retried = buildWith(options, *needed);
+            retried.engineReason = "pdflatex failed: the document needs a Unicode engine";
+            retried.retriedEngine = true;
+            retried.diagnostics.insert(retried.diagnostics.begin(),
+                Diagnostic {
+                    .severity = Diagnostic::Severity::Info,
+                    .message = std::format(
+                        "the document needs {0} — rebuilt with it (set `engine = \"{0}\"` "
+                        "in maketex.toml or add `% !TeX program = {0}` to skip the retry)",
+                        engineKindName(*needed)),
+                });
+            return retried;
+        }
+    }
     return result;
 }
+
+namespace {
+
+    bool sameContent(const fs::path& a, const fs::path& b)
+    {
+        std::error_code ec;
+        auto size = fs::file_size(a, ec);
+        if (ec || fs::file_size(b, ec) != size || ec)
+            return false;
+        std::ifstream fa(a, std::ios::binary);
+        std::ifstream fb(b, std::ios::binary);
+        std::array<char, 65536> ba;
+        std::array<char, 65536> bb;
+        while (fa && fb) {
+            fa.read(ba.data(), ba.size());
+            fb.read(bb.data(), bb.size());
+            if (fa.gcount() != fb.gcount()
+                || !std::equal(ba.begin(), ba.begin() + fa.gcount(), bb.begin()))
+                return false;
+        }
+        return fa.eof() && fb.eof();
+    }
+
+} // namespace
 
 std::vector<fs::path> publishArtifacts(const fs::path& outDir,
     const fs::path& destDir, const std::string& jobName)
@@ -211,6 +355,12 @@ std::vector<fs::path> publishArtifacts(const fs::path& outDir,
         if (!fs::is_regular_file(src, ec))
             continue;
         fs::path dest = destDir / (jobName + ext);
+        // Already published from this build: copying again would only bump
+        // the mtime and make PDF viewers reload for nothing.
+        if (sameContent(src, dest)) {
+            published.push_back(std::move(dest));
+            continue;
+        }
         // Copy to a sibling temp file first: rename within destDir is atomic
         // on POSIX, so a viewer refreshing mid-publish sees old or new,
         // never a torn file. The temp name is fixed — concurrent builds of

@@ -1,5 +1,9 @@
 #include "EffectiveOptions.h"
 
+#include "maketex/DocumentProbe.h"
+
+#include <algorithm>
+
 #include <format>
 #include <ranges>
 #include <string_view>
@@ -29,6 +33,60 @@ namespace {
         return kinds;
     }
 
+    // The document to build: the positional argument (".tex" optional),
+    // else the config's `main` (already absolute), else the one document in
+    // cwd. Then "% !TEX root" is followed, so building from a chapter file —
+    // what editors do — builds the document it belongs to.
+    std::expected<fs::path, std::string> resolveTexFile(const CliArgs& args,
+        const std::optional<Config>& config, const fs::path& cwd)
+    {
+        fs::path texFile;
+        if (args.texFile) {
+            texFile = fs::absolute(*args.texFile);
+            if (!fs::is_regular_file(texFile) && texFile.extension() != ".tex") {
+                auto withExtension = texFile;
+                withExtension += ".tex";
+                if (fs::is_regular_file(withExtension))
+                    texFile = std::move(withExtension);
+            }
+        } else if (config && config->main) {
+            texFile = *config->main;
+        } else {
+            auto roots = findRootDocuments(cwd);
+            if (roots.empty())
+                return std::unexpected(std::format(
+                    "no LaTeX document in {}: no .tex file there starts with "
+                    "\\documentclass (pass a file, or set `main` in maketex.toml)",
+                    cwd.string()));
+            if (roots.size() == 1) {
+                texFile = roots.front();
+            } else {
+                // Conventional names break the tie.
+                auto dirStem = cwd.filename().string() + ".tex";
+                for (const auto& name : { std::string("main.tex"), dirStem }) {
+                    auto it = std::ranges::find_if(roots,
+                        [&](const fs::path& p) { return p.filename() == name; });
+                    if (it != roots.end()) {
+                        texFile = *it;
+                        break;
+                    }
+                }
+                if (texFile.empty()) {
+                    std::string names;
+                    for (const auto& r : roots)
+                        names += (names.empty() ? "" : ", ") + r.filename().string();
+                    return std::unexpected(std::format(
+                        "several documents in {}: {} — pass one (e.g. `maketex {}`) "
+                        "or set `main` in maketex.toml",
+                        cwd.string(), names, roots.front().filename().string()));
+                }
+            }
+        }
+        if (!fs::is_regular_file(texFile))
+            return std::unexpected(std::format("file not found: {}", texFile.string()));
+        return resolveRootDocument(texFile);
+    }
+
     // flag > config > existing default in `target`.
     template <typename T, typename U>
     void merge(T& target, const std::optional<U>& flag,
@@ -49,19 +107,10 @@ std::expected<EffectiveOptions, std::string> assembleOptions(
     out.command = args.command;
     BuildOptions& build = out.build;
 
-    // The positional argument beats the config's `main`. Config paths are
-    // already absolute (resolved against the config file's directory).
-    if (args.texFile)
-        build.texFile = fs::absolute(*args.texFile);
-    else if (config && config->main)
-        build.texFile = *config->main;
-    else
-        return std::unexpected(
-            "no input file: pass a .tex file or set `main` in maketex.toml");
-
-    if (!fs::is_regular_file(build.texFile))
-        return std::unexpected(
-            std::format("file not found: {}", build.texFile.string()));
+    auto texFile = resolveTexFile(args, config, fs::current_path());
+    if (!texFile)
+        return std::unexpected(texFile.error());
+    build.texFile = std::move(*texFile);
 
     if (args.engine) {
         auto kind = parseEngineKind(*args.engine);
@@ -104,6 +153,9 @@ std::expected<EffectiveOptions, std::string> assembleOptions(
         config ? config->maxPasses : std::nullopt);
     if (build.maxPasses <= 0)
         return std::unexpected("max-passes must be positive");
+    if (auto timeout = args.timeoutSeconds ? args.timeoutSeconds
+                                           : (config ? config->timeoutSeconds : std::nullopt))
+        build.processTimeout = std::chrono::seconds(*timeout);
 
     out.extras.verbose = args.verbose;
     out.extras.plain = args.plain;

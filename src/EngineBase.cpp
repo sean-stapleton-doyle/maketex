@@ -8,7 +8,8 @@
 
 namespace maketex {
 
-RunResult<EngineInvocation> EngineBase::run(const EngineInvocation& inv)
+RunResult<EngineInvocation> EngineBase::run(const EngineInvocation& inv,
+    const WaitLimits& limits)
 {
     // TeX wraps log/terminal lines at 79 columns by default, which splits
     // file paths and messages mid-token and defeats diagnostic parsing.
@@ -23,7 +24,7 @@ RunResult<EngineInvocation> EngineBase::run(const EngineInvocation& inv)
     // Run from the tex file's directory so that relative \input{} and \include{}
     // paths resolve correctly regardless of maketex's own working directory.
     return launchProcess(buildArgs(inv), inv.texFile.parent_path(),
-        invokerKind(), inv, kLogWidthEnv);
+        invokerKind(), inv, kLogWidthEnv, limits);
 }
 
 void EngineBase::appendExtraOptions(std::vector<std::string>& args) const

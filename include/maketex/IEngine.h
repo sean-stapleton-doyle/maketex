@@ -2,6 +2,7 @@
 
 #include "maketex/EngineInvocation.h"
 #include "maketex/InvokerKind.h"
+#include "maketex/Process.h"
 #include "maketex/RunResult.h"
 
 #include <string_view>
@@ -12,8 +13,11 @@ class IEngine {
 public:
     virtual ~IEngine() = default;
 
-    // Runs the engine to completion and returns the captured outcome.
-    virtual RunResult<EngineInvocation> run(const EngineInvocation&) = 0;
+    // Runs the engine to completion (or until limits cut it short) and
+    // returns the captured outcome.
+    virtual RunResult<EngineInvocation> run(const EngineInvocation& inv,
+        const WaitLimits& limits)
+        = 0;
 
     // Human-readable name, e.g. "pdflatex", "xelatex".
     virtual std::string_view name() const = 0;
