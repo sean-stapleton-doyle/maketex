@@ -1,0 +1,35 @@
+---
+# Checks chosen to complement -Wall -Wextra -Wpedantic -Wshadow -Wconversion.
+# Style enforcement stays with clang-format (WebKit). Deliberately off:
+#   bugprone-easily-swappable-parameters  — noisy, no actionable fix here
+#   misc-const-correctness                — local-const style not enforced
+#   misc-use-anonymous-namespace          — codebase uses `static` helpers
+#   performance-enum-size                 — enums here are never stored in bulk
+#   clang-diagnostic-missing-designated-field-initializers
+#                                         — partial designated init is idiomatic
+Checks: >
+  bugprone-*,
+  -bugprone-easily-swappable-parameters,
+  -bugprone-exception-escape,
+  clang-analyzer-*,
+  misc-*,
+  -misc-const-correctness,
+  -misc-non-private-member-variables-in-classes,
+  -misc-include-cleaner,
+  -misc-use-anonymous-namespace,
+  modernize-use-nullptr,
+  modernize-use-override,
+  modernize-use-emplace,
+  modernize-loop-convert,
+  modernize-make-unique,
+  performance-*,
+  -performance-enum-size,
+  readability-duplicate-include,
+  readability-misleading-indentation,
+  readability-redundant-smartptr-get,
+  readability-redundant-string-cstr,
+  readability-static-accessed-through-instance,
+  -clang-diagnostic-missing-designated-field-initializers
+WarningsAsErrors: ''
+HeaderFilterRegex: '.*/maketex/(include|cli|src)/.*'
+FormatStyle: file

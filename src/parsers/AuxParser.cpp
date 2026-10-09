@@ -33,19 +33,4 @@ std::string_view AuxParser::extractBraces(std::string_view line, std::string_vie
     return line.substr(prefix.size(), end - prefix.size());
 }
 
-void AuxParser::splitComma(std::string_view s,
-    const std::function<void(std::string_view)>& fn)
-{
-    size_t start = 0;
-    while (true) {
-        auto end = s.find(',', start);
-        if (end == std::string_view::npos) {
-            fn(s.substr(start));
-            break;
-        }
-        fn(s.substr(start, end - start));
-        start = end + 1;
-    }
-}
-
 } // namespace maketex

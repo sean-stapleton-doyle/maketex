@@ -70,7 +70,7 @@ RunDecision HashTriggeredTool::decide(const ToolContext& ctx)
 void HashTriggeredTool::onSuccess(const ToolContext& /*ctx*/)
 {
     if (m_pendingHash)
-        m_lastHash = std::move(m_pendingHash);
+        m_lastHash = m_pendingHash;
     m_pendingHash.reset();
     m_hasRun = true;
 }

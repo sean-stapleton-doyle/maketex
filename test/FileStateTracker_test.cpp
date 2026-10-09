@@ -3,6 +3,8 @@
 #include "maketex/Blake3Hasher.h"
 #include "maketex/IFileHasher.h"
 
+#include "test_utils.h"
+
 #include <gtest/gtest.h>
 
 #include <expected>
@@ -51,7 +53,7 @@ protected:
 
     void SetUp() override
     {
-        m_dir = fs::temp_directory_path() / "maketex_tracker_test";
+        m_dir = maketex::test_utils::uniqueTempDir("maketex_tracker_test");
         fs::create_directories(m_dir);
     }
 
@@ -131,7 +133,7 @@ TEST_F(FileStateTrackerTest, coldPath_callsHasher_whenMtimeDiffers)
     m_db.upsertFileState(stale);
 
     FileStateTracker tracker(m_db, m_hasher);
-    tracker.snapshot(p);
+    ASSERT_TRUE(tracker.snapshot(p).has_value());
 
     EXPECT_EQ(m_hasher.callCount, 1);
 }
@@ -142,7 +144,7 @@ TEST_F(FileStateTrackerTest, coldPath_callsHasher_whenStoredIsAbsent)
     m_db.upsertFileState(FileState::absent(p.string()));
 
     FileStateTracker tracker(m_db, m_hasher);
-    tracker.snapshot(p);
+    ASSERT_TRUE(tracker.snapshot(p).has_value());
 
     EXPECT_EQ(m_hasher.callCount, 1);
 }

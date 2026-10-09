@@ -4,7 +4,8 @@
 
 namespace maketex::diagnostics {
 
-void format(const std::vector<Diagnostic>& diagnostics, std::ostream& out, bool verbose)
+void format(const std::vector<Diagnostic>& diagnostics, std::ostream& out,
+    Verbosity verbosity)
 {
     for (const auto& d : diagnostics) {
         switch (d.severity) {
@@ -27,7 +28,7 @@ void format(const std::vector<Diagnostic>& diagnostics, std::ostream& out, bool 
 
         out << ": " << d.message << "\n";
 
-        if (verbose && !d.rawContext.empty())
+        if (verbosity == Verbosity::Verbose && !d.rawContext.empty())
             out << d.rawContext << "\n";
     }
 }

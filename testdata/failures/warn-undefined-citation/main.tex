@@ -1,0 +1,24 @@
+% Fixture: failures/warn-undefined-citation
+%
+% Purpose: verify that an undefined citation surfaces as a warning carrying
+% the citation key.
+%
+% Expected maketex behaviour:
+%   - Engine: pdflatex
+%   - Exit: 0 (PDF produced)
+%
+% Log warning (exact text):
+%   LaTeX Warning: Citation `nosuchkey2026' on page 1 undefined on input line 7.
+%
+% The error surfacing system should extract:
+%   - type:     warning
+%   - category: undefined-citation
+%   - message:  contains the key `nosuchkey2026'
+
+\documentclass{article}
+
+\begin{document}
+
+As shown in \cite{nosuchkey2026}, citations can dangle.
+
+\end{document}

@@ -79,3 +79,36 @@ TEST(Process, largeOutput)
     EXPECT_EQ(r.exitCode, 0);
     EXPECT_EQ(r.stdoutOutput.size(), 1024UL * 1024UL);
 }
+
+TEST(Process, extraEnvAppendsNewVariable)
+{
+    std::vector<std::pair<std::string, std::string>> env {
+        { "MAKETEX_TEST_VAR", "hello" },
+    };
+    Process p(std::vector<std::string> { "/bin/sh", "-c", "echo $MAKETEX_TEST_VAR" },
+        { }, env);
+    auto r = p.wait();
+    EXPECT_EQ(r.exitCode, 0);
+    EXPECT_EQ(r.stdoutOutput, "hello\n");
+}
+
+TEST(Process, extraEnvOverridesInheritedVariable)
+{
+    // HOME is always present in the inherited environment; the override must
+    // replace it, not duplicate it.
+    std::vector<std::pair<std::string, std::string>> env {
+        { "HOME", "/maketex-test-home" },
+    };
+    Process p(std::vector<std::string> { "/bin/sh", "-c", "echo $HOME" }, { }, env);
+    auto r = p.wait();
+    EXPECT_EQ(r.exitCode, 0);
+    EXPECT_EQ(r.stdoutOutput, "/maketex-test-home\n");
+}
+
+TEST(Process, emptyExtraEnvInheritsEnvironment)
+{
+    Process p(std::vector<std::string> { "/bin/sh", "-c", "echo $HOME" });
+    auto r = p.wait();
+    EXPECT_EQ(r.exitCode, 0);
+    EXPECT_NE(r.stdoutOutput, "\n");
+}

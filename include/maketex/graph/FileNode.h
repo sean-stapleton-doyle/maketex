@@ -3,7 +3,9 @@
 #include "maketex/FileStateTracker.h"
 #include "maketex/StateDatabase.h"
 
+#include <expected>
 #include <filesystem>
+#include <system_error>
 
 namespace maketex {
 
@@ -25,9 +27,11 @@ public:
     FileRole role() const { return m_role; }
     void setRole(FileRole role) { m_role = role; }
 
-    // Snapshots the current state from disk. Stores and returns the new state.
-    // On error, leaves the cached state untouched and returns it.
-    const FileState& refresh(FileStateTracker& tracker);
+    // Snapshots the current state from disk, caches it, and returns it. On
+    // error (stat/open failure other than ENOENT, which is a normal "absent"
+    // state), leaves the cached state untouched and returns the error_code
+    // (E.7: do not silently discard it). Callers must propagate or react.
+    std::expected<FileState, std::error_code> refresh(FileStateTracker& tracker);
 
     // The state from the most recent refresh(). Default (exists=false) if never refreshed.
     const FileState& state() const { return m_state; }

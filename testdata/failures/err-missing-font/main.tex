@@ -1,0 +1,25 @@
+% Fixture: failures/err-missing-font
+%
+% Purpose: verify that a fontspec font-not-found error is categorised
+% missing-font. Requires xelatex (or lualatex) — fontspec needs a
+% unicode engine.
+%
+% Expected maketex behaviour:
+%   - Engine: xelatex -halt-on-error -file-line-error
+%   - Exit: 1 (fatal error)
+%
+% Log error (shape):
+%   ./main.tex:5: Package fontspec Error: The font "No Such Font 2026" cannot be found.
+%
+% The error surfacing system should extract:
+%   - type:     error
+%   - category: missing-font
+%   - file:     main.tex
+
+\documentclass{article}
+\usepackage{fontspec}
+\setmainfont{No Such Font 2026}
+
+\begin{document}
+Text never reached.
+\end{document}

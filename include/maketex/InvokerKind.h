@@ -2,7 +2,7 @@
 
 namespace maketex {
 
-enum class InvokerKind { PdfLatex,
+enum class InvokerKind { PdfLaTeX,
     XeLaTeX,
     LuaLaTeX,
     Bibtex,

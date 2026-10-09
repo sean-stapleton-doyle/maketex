@@ -13,7 +13,7 @@ public:
     using EngineBase::EngineBase;
 
     std::string_view name() const override { return "pdflatex"; }
-    InvokerKind invokerKind() const override { return InvokerKind::PdfLatex; }
+    InvokerKind invokerKind() const override { return InvokerKind::PdfLaTeX; }
     std::vector<std::string> buildArgs(const EngineInvocation& inv) const override;
 };
 

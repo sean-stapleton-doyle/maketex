@@ -1,5 +1,7 @@
 #include "maketex/Blake3Hasher.h"
 
+#include "test_utils.h"
+
 #include <gtest/gtest.h>
 
 #include <filesystem>
@@ -19,7 +21,7 @@ protected:
 
     void SetUp() override
     {
-        m_dir = fs::temp_directory_path() / "maketex_hasher_test";
+        m_dir = maketex::test_utils::uniqueTempDir("maketex_hasher_test");
         fs::create_directories(m_dir);
     }
 

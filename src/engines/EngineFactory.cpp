@@ -11,11 +11,11 @@ namespace maketex {
 std::optional<EngineKind> parseEngineKind(std::string_view name)
 {
     if (name == "pdflatex")
-        return EngineKind::PdfLatex;
+        return EngineKind::PdfLaTeX;
     if (name == "xelatex")
-        return EngineKind::XeLatex;
+        return EngineKind::XeLaTeX;
     if (name == "lualatex")
-        return EngineKind::LuaLatex;
+        return EngineKind::LuaLaTeX;
     return std::nullopt;
 }
 
@@ -23,11 +23,11 @@ std::unique_ptr<EngineBase> createEngine(EngineKind kind,
     EngineArguments arguments)
 {
     switch (kind) {
-    case EngineKind::PdfLatex:
+    case EngineKind::PdfLaTeX:
         return std::make_unique<PdfLatexEngine>(std::move(arguments));
-    case EngineKind::XeLatex:
+    case EngineKind::XeLaTeX:
         return std::make_unique<XeLatexEngine>(std::move(arguments));
-    case EngineKind::LuaLatex:
+    case EngineKind::LuaLaTeX:
         return std::make_unique<LuaLatexEngine>(std::move(arguments));
     }
     std::unreachable();

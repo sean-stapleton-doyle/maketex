@@ -37,3 +37,15 @@ testdata/**/*.stdout
 
 # macOS
 .DS_Store
+
+# Default maketex output directory (testdata builds)
+.maketex/
+
+# CTest scratch and local analysis output
+Testing/
+graphify-out/
+
+# Hugo build output
+docs-site/public/
+docs-site/resources/
+docs-site/.hugo_build.lock

@@ -9,13 +9,13 @@ FileNode::FileNode(std::filesystem::path path, FileRole role)
 {
 }
 
-const FileState& FileNode::refresh(FileStateTracker& tracker)
+std::expected<FileState, std::error_code> FileNode::refresh(FileStateTracker& tracker)
 {
     auto snap = tracker.snapshot(m_path);
-    if (snap.has_value()) {
-        m_state = std::move(snap.value());
-        m_refreshed = true;
-    }
+    if (!snap)
+        return std::unexpected(snap.error());
+    m_state = std::move(*snap);
+    m_refreshed = true;
     return m_state;
 }
 

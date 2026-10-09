@@ -2,8 +2,16 @@
 
 ## Overview
 
+- [Usage](USAGE.md) — the `maketex` command line: build, watch, clean
+- [CI](ci.md) — caching `.maketex/`, `--format=github`/`json`, GitHub Actions recipe
 - [Architecture](architecture.md) — layer diagram, data flow, type system, key design decisions
+- [Configuration](configuration.md) — the `maketex.toml` config file: discovery, schema, precedence
 - [Implementation Progress](implementation_progress.md) — what is built, what remains
+
+Building: the core library always builds; `MAKETEX_BUILD_CLI`,
+`MAKETEX_BUILD_HARNESS`, and `MAKETEX_BUILD_TESTS` control the rest and
+default to ON only when maketex is the top-level CMake project, so embedding
+consumers get just the library (and only its two dependencies).
 
 ## Design Documents
 

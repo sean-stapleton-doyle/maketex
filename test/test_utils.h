@@ -16,6 +16,8 @@
 #include <string>
 #include <system_error>
 
+#include <unistd.h>
+
 namespace maketex::test_utils {
 
 namespace fs = std::filesystem;
@@ -40,9 +42,25 @@ public:
     Hash returnHash {};
 };
 
+// A temp path unique to the running test: ctest runs every discovered test
+// in its own process, in parallel under -j, so a per-fixture name would let
+// one test's TearDown delete a sibling's files mid-run.
+inline fs::path uniqueTempDir(const std::string& stem)
+{
+    std::string name = stem;
+    if (const auto* info = ::testing::UnitTest::GetInstance()->current_test_info()) {
+        name += '-';
+        name += info->test_suite_name();
+        name += '.';
+        name += info->name();
+    }
+    name += '-' + std::to_string(::getpid());
+    return fs::temp_directory_path() / name;
+}
+
 // GoogleTest fixture base providing a per-test temp directory under
-// std::filesystem::temp_directory_path() / dirName(). Subclasses implement
-// dirName() to pick a unique name.
+// std::filesystem::temp_directory_path(), named from dirName() plus the
+// running test. Subclasses implement dirName() to pick a stem.
 class TempDirFixture : public ::testing::Test {
 protected:
     fs::path m_dir;
@@ -51,7 +69,7 @@ protected:
 
     void SetUp() override
     {
-        m_dir = fs::temp_directory_path() / dirName();
+        m_dir = uniqueTempDir(dirName());
         fs::create_directories(m_dir);
     }
 

@@ -1,0 +1,105 @@
+#include "CleanPlan.h"
+
+#include <algorithm>
+#include <set>
+#include <string_view>
+
+namespace fs = std::filesystem;
+
+namespace maketex::cli {
+
+namespace {
+
+    // Aux files produced by the engine and the standard tool roster.
+    constexpr std::string_view kCleanExtensions[] = {
+        ".acn", ".acr", ".alg", ".aux", ".bbl", ".bcf", ".blg", ".fls",
+        ".glg", ".glo", ".gls", ".idx", ".ilg", ".ind", ".ist", ".loa",
+        ".lof", ".log", ".lot", ".nav", ".out", ".pytxcode", ".run.xml",
+        ".snm", ".toc", ".vrb", ".xdy"
+    };
+
+    // Final products, removed only with --all.
+    constexpr std::string_view kProductExtensions[] = {
+        ".pdf", ".synctex.gz", ".dvi"
+    };
+
+    bool isInside(const fs::path& p, const fs::path& dir)
+    {
+        auto rel = fs::weakly_canonical(p).lexically_relative(
+            fs::weakly_canonical(dir));
+        return !rel.empty() && rel.native() != "."
+            && !rel.native().starts_with("..");
+    }
+
+} // namespace
+
+CleanPlan computeCleanPlan(const std::optional<BuildFileSets>& fileSets,
+    const fs::path& texFile,
+    const fs::path& outputDir,
+    const std::string& jobName,
+    bool all,
+    const std::vector<std::string>& extraExtensions,
+    const std::vector<fs::path>& publishedArtifacts)
+{
+    std::set<fs::path> candidates;
+
+    for (std::string_view ext : kCleanExtensions)
+        candidates.insert(outputDir / (jobName + std::string(ext)));
+    for (const auto& ext : extraExtensions)
+        candidates.insert(outputDir / (jobName + ext));
+    candidates.insert(outputDir / ("pythontex-files-" + jobName));
+
+    // Published artifacts live outside outputDir by design; track their
+    // canonical forms so the outside-outputDir safety check can wave
+    // exactly these through.
+    std::set<fs::path> publishedSet;
+    for (const auto& p : publishedArtifacts)
+        publishedSet.insert(fs::weakly_canonical(p));
+
+    if (all) {
+        for (std::string_view ext : kProductExtensions)
+            candidates.insert(outputDir / (jobName + std::string(ext)));
+        candidates.insert(outputDir / ".maketex.db");
+        for (const auto& p : publishedArtifacts)
+            candidates.insert(p);
+    }
+
+    CleanPlan plan;
+
+    if (fileSets) {
+        for (const auto& p : fileSets->generated) {
+            if (isInside(p, outputDir))
+                candidates.insert(p);
+            else
+                plan.skippedOutside.push_back(p);
+        }
+    }
+
+    const fs::path canonicalTex = fs::weakly_canonical(texFile);
+    std::set<fs::path> protectedPaths;
+    if (!all) {
+        for (std::string_view ext : kProductExtensions)
+            protectedPaths.insert(
+                fs::weakly_canonical(outputDir / (jobName + std::string(ext))));
+        protectedPaths.insert(fs::weakly_canonical(outputDir / ".maketex.db"));
+        for (const auto& p : publishedSet)
+            protectedPaths.insert(p);
+    }
+
+    for (const auto& candidate : candidates) {
+        auto canonical = fs::weakly_canonical(candidate);
+        if (canonical == canonicalTex || protectedPaths.contains(canonical))
+            continue;
+        if (!isInside(candidate, outputDir) && !publishedSet.contains(canonical))
+            continue; // jobName.<ext> candidates are always inside; belt and braces
+        std::error_code ec;
+        if (fs::exists(candidate, ec))
+            plan.remove.push_back(candidate);
+    }
+
+    std::ranges::sort(plan.remove);
+    std::ranges::sort(plan.skippedOutside);
+    return plan;
+}
+
+} // namespace maketex::cli

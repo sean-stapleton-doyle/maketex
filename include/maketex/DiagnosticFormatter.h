@@ -7,9 +7,14 @@
 
 namespace maketex::diagnostics {
 
+// Output verbosity for format().
+enum class Verbosity {
+    Normal, // severity, file:line, and message only
+    Verbose, // also prints rawContext for each diagnostic
+};
+
 // Formats a vector of Diagnostics for terminal output.
-// At normal verbosity: severity, file:line, and message only.
-// With verbose=true: also prints rawContext for each diagnostic.
-void format(const std::vector<Diagnostic>& diagnostics, std::ostream& out, bool verbose = false);
+void format(const std::vector<Diagnostic>& diagnostics, std::ostream& out,
+    Verbosity verbosity = Verbosity::Normal);
 
 } // namespace maketex::diagnostics

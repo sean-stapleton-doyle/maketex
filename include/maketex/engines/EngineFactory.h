@@ -12,9 +12,9 @@ namespace maketex {
 // The engines maketex can drive. Distinct from InvokerKind, which also tags
 // auxiliary tools and exists for diagnostic-parser dispatch.
 enum class EngineKind {
-    PdfLatex,
-    XeLatex,
-    LuaLatex,
+    PdfLaTeX,
+    XeLaTeX,
+    LuaLaTeX,
 };
 
 // Maps a config/CLI engine name ("pdflatex", "xelatex", "lualatex") to its

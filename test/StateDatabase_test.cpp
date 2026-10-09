@@ -1,6 +1,13 @@
 #include "maketex/StateDatabase.h"
 
+#include "test_utils.h"
+
 #include <gtest/gtest.h>
+
+#include <algorithm>
+#include <filesystem>
+#include <string>
+#include <vector>
 
 using namespace maketex;
 
@@ -144,4 +151,111 @@ TEST(StateDatabase, setRuleInputs_replacesExisting)
     ASSERT_EQ(stored.size(), 1u);
     EXPECT_EQ(stored[0].first, "/a/other.tex");
     EXPECT_EQ(db.getRuleInputHash("latex", "/a/main.tex"), std::nullopt);
+}
+
+// ── manifest / compatibility ──────────────────────────────────────────────────
+
+TEST(StateDatabase, freshDatabaseIsNotReset)
+{
+    StateDatabase db(makeMemoryDb(),
+        { .projectRoot = "/proj", .fingerprint = "engine=pdflatex" });
+    EXPECT_FALSE(db.wasReset());
+}
+
+TEST(StateDatabase, matchingFingerprintKeepsState)
+{
+    auto dir = maketex::test_utils::uniqueTempDir("maketex_statedb_keep");
+    std::filesystem::create_directories(dir);
+    auto path = (dir / "state.db").string();
+    maketex::StateDbConfig config { .fingerprint = "fp-a" };
+    {
+        StateDatabase db(std::make_unique<SQLite::Database>(path,
+                             SQLite::OPEN_READWRITE | SQLite::OPEN_CREATE),
+            config);
+        db.upsertRule({ .name = "r", .command = "c", .ran_at = 1, .succeeded = true });
+    }
+    StateDatabase db(std::make_unique<SQLite::Database>(path,
+                         SQLite::OPEN_READWRITE | SQLite::OPEN_CREATE),
+        config);
+    EXPECT_FALSE(db.wasReset());
+    EXPECT_TRUE(db.getRule("r").has_value());
+    std::filesystem::remove_all(dir);
+}
+
+TEST(StateDatabase, changedFingerprintWipesState)
+{
+    // A file-backed db in a temp dir so two StateDatabase instances can
+    // open the same store in sequence.
+    auto dir = maketex::test_utils::uniqueTempDir("maketex_statedb_fp");
+    std::filesystem::create_directories(dir);
+    auto path = (dir / "state.db").string();
+    {
+        StateDatabase db(std::make_unique<SQLite::Database>(path,
+                             SQLite::OPEN_READWRITE | SQLite::OPEN_CREATE),
+            { .fingerprint = "fp-a" });
+        db.upsertRule({ .name = "r", .command = "c", .ran_at = 1, .succeeded = true });
+    }
+    StateDatabase db(std::make_unique<SQLite::Database>(path,
+                         SQLite::OPEN_READWRITE | SQLite::OPEN_CREATE),
+        { .fingerprint = "fp-b" });
+    EXPECT_TRUE(db.wasReset());
+    EXPECT_FALSE(db.getRule("r").has_value());
+    std::filesystem::remove_all(dir);
+}
+
+TEST(StateDatabase, schemaV1DatabaseIsWiped)
+{
+    // Simulate a pre-manifest database: tables with rows but no meta table.
+    auto raw = makeMemoryDb();
+    raw->exec("CREATE TABLE rules (name TEXT PRIMARY KEY, command TEXT NOT NULL,"
+              " ran_at INTEGER NOT NULL DEFAULT 0,"
+              " succeeded INTEGER NOT NULL DEFAULT 0);"
+              "INSERT INTO rules VALUES ('old', 'cmd', 1, 1);");
+
+    StateDatabase db(std::move(raw));
+    EXPECT_TRUE(db.wasReset());
+    EXPECT_FALSE(db.getRule("old").has_value());
+}
+
+// ── path portability ──────────────────────────────────────────────────────────
+
+TEST(StateDatabase, projectRootMakesFileStatePortable)
+{
+    auto dir = maketex::test_utils::uniqueTempDir("maketex_statedb_portable");
+    std::filesystem::create_directories(dir);
+    auto path = (dir / "state.db").string();
+    {
+        StateDatabase db(std::make_unique<SQLite::Database>(path,
+                             SQLite::OPEN_READWRITE | SQLite::OPEN_CREATE),
+            { .projectRoot = "/checkout/a" });
+        db.upsertFileState(FileState {
+            .path = "/checkout/a/main.tex", .exists = true, .mtime = 7, .size = 3 });
+    }
+    // Same store, different absolute location: the relative key must hit.
+    StateDatabase db(std::make_unique<SQLite::Database>(path,
+                         SQLite::OPEN_READWRITE | SQLite::OPEN_CREATE),
+        { .projectRoot = "/checkout/b" });
+    auto state = db.getFileState("/checkout/b/main.tex");
+    ASSERT_TRUE(state.has_value());
+    EXPECT_EQ(state->mtime, 7);
+    EXPECT_EQ(state->path, "/checkout/b/main.tex");
+    std::filesystem::remove_all(dir);
+}
+
+TEST(StateDatabase, ruleInputsDecodeAgainstCurrentRoot)
+{
+    StateDatabase db(makeMemoryDb(), { .projectRoot = "/proj" });
+    db.upsertRule({ .name = "latex", .command = "c", .ran_at = 1, .succeeded = true });
+    db.setRuleInputs("latex",
+        { { "/proj/main.tex", Hash { 1 } },
+            { "/usr/texmf/article.cls", Hash { 2 } } });
+
+    EXPECT_TRUE(db.getRuleInputHash("latex", "/proj/main.tex").has_value());
+
+    auto inputs = db.getRuleInputs("latex");
+    ASSERT_EQ(inputs.size(), 2u);
+    std::vector<std::string> paths { inputs[0].first, inputs[1].first };
+    EXPECT_NE(std::find(paths.begin(), paths.end(), "/proj/main.tex"), paths.end());
+    EXPECT_NE(std::find(paths.begin(), paths.end(), "/usr/texmf/article.cls"),
+        paths.end());
 }

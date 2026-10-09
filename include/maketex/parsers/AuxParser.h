@@ -2,10 +2,10 @@
 
 #include <expected>
 #include <filesystem>
-#include <functional>
 #include <string>
 #include <string_view>
 #include <system_error>
+#include <utility>
 #include <vector>
 
 namespace maketex {
@@ -25,8 +25,26 @@ public:
 
 private:
     static std::string_view extractBraces(std::string_view line, std::string_view prefix);
-    static void splitComma(std::string_view s,
-        const std::function<void(std::string_view)>& fn);
+
+    // Templated on the callback (cf. detail::forEachLine) so the call site is
+    // monomorphised — avoids a per-call std::function indirection.
+    template <typename Fn>
+    static void splitComma(std::string_view s, Fn&& fn);
 };
+
+template <typename Fn>
+void AuxParser::splitComma(std::string_view s, Fn&& fn)
+{
+    size_t start = 0;
+    while (true) {
+        auto end = s.find(',', start);
+        if (end == std::string_view::npos) {
+            std::forward<Fn>(fn)(s.substr(start));
+            break;
+        }
+        std::forward<Fn>(fn)(s.substr(start, end - start));
+        start = end + 1;
+    }
+}
 
 } // namespace maketex

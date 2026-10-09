@@ -24,17 +24,20 @@ public:
     // Returns the existing node if one with this path already exists (role ignored).
     // Paths are weakly-canonicalised before lookup to prevent duplicates from
     // relative vs. absolute representations of the same file.
-    FileNode& getOrAddFile(std::filesystem::path path, FileRole role);
+    FileNode& getOrAddFile(const std::filesystem::path& path, FileRole role);
 
     // Returns the existing node if one with this name already exists.
-    RuleNode& getOrAddRule(std::string name);
+    RuleNode& getOrAddRule(const std::string& name);
 
     // nullptr if not found.
-    FileNode* findFile(const std::filesystem::path& path) const;
-    RuleNode* findRule(const std::string& name) const;
+    FileNode* findFile(const std::filesystem::path& path);
+    RuleNode* findRule(const std::string& name);
+    const FileNode* findFile(const std::filesystem::path& path) const;
+    const RuleNode* findRule(const std::string& name) const;
 
     // All file nodes (unordered).
-    std::vector<FileNode*> files() const;
+    std::vector<FileNode*> files();
+    std::vector<const FileNode*> files() const;
 
 private:
     // Keyed by weakly-canonical path string for deduplication.

@@ -25,17 +25,30 @@ BuildDriver::BuildDriver(IEngine& engine,
     StateDatabase& db,
     IFileHasher& hasher,
     EngineInvocation inv,
-    int maxPasses,
-    std::vector<ITool*> tools,
-    std::vector<std::filesystem::path> ignorePrefixes)
+    Config config)
     : m_engine(engine)
     , m_db(db)
     , m_hasher(hasher)
     , m_inv(std::move(inv))
-    , m_maxPasses(maxPasses)
-    , m_tools(std::move(tools))
-    , m_ignorePrefixes(std::move(ignorePrefixes))
+    , m_maxPasses(config.maxPasses)
+    , m_tools(std::move(config.tools))
+    , m_ignorePrefixes(std::move(config.ignorePrefixes))
+    , m_observer(std::move(config.observer))
 {
+}
+
+BuildDriver::BuildDriver(IEngine& engine,
+    StateDatabase& db,
+    IFileHasher& hasher,
+    EngineInvocation inv)
+    : BuildDriver(engine, db, hasher, std::move(inv), Config { })
+{
+}
+
+void BuildDriver::notify(const BuildEvent& event) const
+{
+    if (m_observer)
+        m_observer(event);
 }
 
 // ── helpers ───────────────────────────────────────────────────────────────────
@@ -89,6 +102,9 @@ ToolContext BuildDriver::makeToolContext() const
 void BuildDriver::updateGraphFromFls(const std::filesystem::path& fls)
 {
     FlsParser parser;
+    // The .fls may predate a directory move (a restored CI cache): re-root
+    // its recorded paths onto where the document lives now.
+    parser.overridePwd(m_inv.texFile.parent_path());
     for (const auto& prefix : m_ignorePrefixes)
         parser.addIgnorePrefix(prefix);
     auto parsed = parser.parse(fls);
@@ -124,15 +140,18 @@ void BuildDriver::updateGraphFromFls(const std::filesystem::path& fls)
 
 // ── BuildDriver::takeSnapshot ─────────────────────────────────────────────────
 
-std::unordered_map<std::string, Hash> BuildDriver::takeSnapshot(FileStateTracker& tracker)
+std::expected<std::unordered_map<std::string, Hash>, std::error_code>
+BuildDriver::takeSnapshot(FileStateTracker& tracker)
 {
     std::unordered_map<std::string, Hash> snap;
     for (auto* f : m_graph.files()) {
-        if (f->role() == FileRole::Generated) {
-            f->refresh(tracker);
-            if (f->state().exists)
-                snap[f->path().string()] = f->state().hash;
-        }
+        if (f->role() != FileRole::Generated)
+            continue;
+        auto state = f->refresh(tracker);
+        if (!state)
+            return std::unexpected(state.error());
+        if (state->exists)
+            snap[f->path().string()] = state->hash;
     }
     return snap;
 }
@@ -152,7 +171,8 @@ bool BuildDriver::tryIncrementalSkip(FileStateTracker& tracker)
         return false;
 
     for (auto* node : latexRule->inputs())
-        node->refresh(tracker);
+        if (auto r = node->refresh(tracker); !r)
+            return false; // snapshot error — fall through to a real build pass
     if (latexRule->isStale(m_db))
         return false;
 
@@ -180,7 +200,8 @@ bool BuildDriver::tryIncrementalSkip(FileStateTracker& tracker)
         for (const auto& p : tool->trackedInputs(ctx))
             toolRule.addInput(&m_graph.getOrAddFile(p, FileRole::Source));
         for (auto* node : toolRule.inputs())
-            node->refresh(tracker);
+            if (auto r = node->refresh(tracker); !r)
+                return false; // snapshot error — fall through to a real build
         if (toolRule.isStale(m_db))
             return false;
 
@@ -196,7 +217,8 @@ bool BuildDriver::tryIncrementalSkip(FileStateTracker& tracker)
 
 // ── BuildDriver::persistEnginePass ───────────────────────────────────────────
 
-void BuildDriver::persistEnginePass(FileStateTracker& tracker, RuleNode& latexRule)
+std::expected<void, std::error_code> BuildDriver::persistEnginePass(
+    FileStateTracker& tracker, RuleNode& latexRule)
 {
     // markRan happens after updateGraphFromFls so the rule's input list
     // reflects what the engine actually read this pass. Inputs must be
@@ -206,8 +228,10 @@ void BuildDriver::persistEnginePass(FileStateTracker& tracker, RuleNode& latexRu
     if (fs::exists(fls))
         updateGraphFromFls(fls);
     for (auto* node : latexRule.inputs())
-        node->refresh(tracker);
+        if (auto r = node->refresh(tracker); !r)
+            return std::unexpected(r.error());
     latexRule.markRan(m_db, true, m_inv.texFile.string());
+    return { };
 }
 
 // ── BuildDriver::persistFileStates ───────────────────────────────────────────
@@ -226,13 +250,36 @@ void BuildDriver::persistFileStates()
 
 BuildDriver::ToolPassOutcome BuildDriver::runAuxiliaryTools(ToolContext& ctx)
 {
+    // Tools run from the output directory (their .aux/.idx inputs live
+    // there), which hides source-adjacent files — .bib, .bst, .ist — once
+    // the output directory is not the tex directory. These kpathsea search
+    // paths re-expose it; the trailing ':' appends the system defaults
+    // (the same mechanism latexmk uses with -outdir).
+    const std::string texDir = m_inv.texFile.parent_path().string() + ":";
+    const std::vector<std::pair<std::string, std::string>> toolEnv = {
+        { "BIBINPUTS", texDir },
+        { "BSTINPUTS", texDir },
+        { "TEXINPUTS", texDir },
+        { "INDEXSTYLE", texDir },
+    };
+
     ToolPassOutcome outcome;
     for (auto* tool : m_tools) {
         if (tool->decide(ctx) != RunDecision::Run)
             continue;
+        notify({ .kind = BuildEvent::Kind::ToolStarted,
+            .toolName = std::string(tool->name()) });
         auto toolInv = makeToolInv(m_inv);
-        auto toolResult = launchProcess(tool->buildArgs(toolInv),
-            toolInv.workingDir, tool->invokerKind(), std::move(toolInv));
+        // Evaluated before the launchProcess call: its by-value invocation
+        // parameter may be move-constructed before sibling arguments read
+        // toolInv (argument evaluation is indeterminately sequenced).
+        auto args = tool->buildArgs(toolInv);
+        auto workingDir = toolInv.workingDir;
+        auto toolResult = launchProcess(args, workingDir, tool->invokerKind(),
+            std::move(toolInv), toolEnv);
+        notify({ .kind = BuildEvent::Kind::ToolFinished,
+            .toolName = std::string(tool->name()),
+            .success = toolResult.success() });
         if (!toolResult.success()) {
             outcome.failedToolName = std::string(tool->name());
             outcome.failure = std::move(toolResult);
@@ -247,7 +294,8 @@ BuildDriver::ToolPassOutcome BuildDriver::runAuxiliaryTools(ToolContext& ctx)
 
 // ── BuildDriver::persistToolRules ─────────────────────────────────────────────
 
-void BuildDriver::persistToolRules(FileStateTracker& tracker,
+std::expected<void, std::error_code> BuildDriver::persistToolRules(
+    FileStateTracker& tracker,
     const ToolContext& ctx,
     const std::vector<ITool*>& ranTools)
 {
@@ -256,9 +304,11 @@ void BuildDriver::persistToolRules(FileStateTracker& tracker,
         for (const auto& p : tool->trackedInputs(ctx))
             rule.addInput(&m_graph.getOrAddFile(p, FileRole::Source));
         for (auto* node : rule.inputs())
-            node->refresh(tracker);
+            if (auto r = node->refresh(tracker); !r)
+                return std::unexpected(r.error());
         rule.markRan(m_db, true, std::string(tool->name()));
     }
+    return { };
 }
 
 // ── BuildDriver::run ─────────────────────────────────────────────────────────
@@ -276,6 +326,7 @@ DriverResult BuildDriver::run()
         // Persist any freshly computed states so the next invocation's
         // (mtime, size) fast path can skip rehashing.
         persistFileStates();
+        notify({ .kind = BuildEvent::Kind::SkippedUpToDate });
         result.success = true;
         return result;
     }
@@ -284,9 +335,17 @@ DriverResult BuildDriver::run()
 
     for (int pass = 0; pass < m_maxPasses; ++pass) {
         auto beforeSnapshot = takeSnapshot(tracker);
+        if (!beforeSnapshot) {
+            result.lastError = "snapshot failed: " + beforeSnapshot.error().message();
+            return result;
+        }
 
+        notify({ .kind = BuildEvent::Kind::PassStarted, .pass = pass + 1 });
         auto engineResult = m_engine.run(m_inv);
         ++result.passes;
+        notify({ .kind = BuildEvent::Kind::PassFinished,
+            .pass = pass + 1,
+            .success = engineResult.success() });
 
         auto& latexRule = m_graph.getOrAddRule(engineRuleName());
 
@@ -298,9 +357,17 @@ DriverResult BuildDriver::run()
             return result;
         }
 
-        persistEnginePass(tracker, latexRule);
+        if (auto r = persistEnginePass(tracker, latexRule); !r) {
+            result.lastError = "snapshot failed: " + r.error().message();
+            return result;
+        }
 
-        bool filesChanged = (takeSnapshot(tracker) != beforeSnapshot);
+        auto afterSnapshot = takeSnapshot(tracker);
+        if (!afterSnapshot) {
+            result.lastError = "snapshot failed: " + afterSnapshot.error().message();
+            return result;
+        }
+        bool filesChanged = (*afterSnapshot != *beforeSnapshot);
 
         auto ctx = makeToolContext();
 
@@ -321,7 +388,10 @@ DriverResult BuildDriver::run()
             // Tool input hashes are recorded only now, post-convergence, so
             // they reflect the final on-disk contents (latex rewrites .bcf
             // and .aux on every pass).
-            persistToolRules(tracker, ctx, ranTools);
+            if (auto r = persistToolRules(tracker, ctx, ranTools); !r) {
+                result.lastError = "snapshot failed: " + r.error().message();
+                return result;
+            }
             persistFileStates();
             result.success = true;
             result.diagnostics = diagnostics::extract(engineResult);

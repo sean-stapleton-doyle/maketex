@@ -1,8 +1,9 @@
 #include "maketex/graph/FileNode.h"
 
-#include "maketex/Blake3Hasher.h"
 #include "maketex/IFileHasher.h"
 #include "maketex/StateDatabase.h"
+
+#include "test_utils.h"
 
 #include <gtest/gtest.h>
 
@@ -12,10 +13,8 @@
 #include <memory>
 #include <system_error>
 
-using maketex::Blake3Hasher;
 using maketex::FileNode;
 using maketex::FileRole;
-using maketex::FileState;
 using maketex::FileStateTracker;
 using maketex::Hash;
 using maketex::IFileHasher;
@@ -51,7 +50,7 @@ protected:
 
     void SetUp() override
     {
-        m_dir = fs::temp_directory_path() / "maketex_filenode_test";
+        m_dir = maketex::test_utils::uniqueTempDir("maketex_filenode_test");
         fs::create_directories(m_dir);
     }
 
@@ -88,10 +87,11 @@ TEST_F(FileNodeTest, refreshUpdatesStateForPresentFile)
     FileStateTracker tracker(m_db, m_hasher);
     FileNode node(p, FileRole::Generated);
 
-    const auto& state = node.refresh(tracker);
+    auto result = node.refresh(tracker);
 
-    EXPECT_TRUE(state.exists);
-    EXPECT_EQ(&state, &node.state()); // refresh() returns the stored state
+    ASSERT_TRUE(result.has_value());
+    EXPECT_TRUE(result->exists);
+    EXPECT_EQ(result->hash, node.state().hash); // refresh caches what it returns
 }
 
 TEST_F(FileNodeTest, refreshReturnsAbsentForMissingFile)
@@ -99,7 +99,8 @@ TEST_F(FileNodeTest, refreshReturnsAbsentForMissingFile)
     FileStateTracker tracker(m_db, m_hasher);
     FileNode node(m_dir / "nonexistent.aux", FileRole::Generated);
 
-    const auto& state = node.refresh(tracker);
+    auto result = node.refresh(tracker);
 
-    EXPECT_FALSE(state.exists);
+    ASSERT_TRUE(result.has_value());
+    EXPECT_FALSE(result->exists);
 }
