@@ -6,8 +6,10 @@
 #include <cctype>
 #include <charconv>
 #include <filesystem>
+#include <fstream>
 #include <optional>
 #include <ranges>
+#include <regex>
 #include <sstream>
 #include <string>
 #include <string_view>
@@ -160,9 +162,11 @@ namespace {
         if (containsAny(msg, { "font", "Font" })
             && containsAny(msg, { "cannot be found", "not loadable", "cannot be loaded" }))
             return "missing-font";
-        if (containsAny(msg, { "not found" })
-            && (msg.starts_with("File `") || msg.starts_with("I can't find file")))
+        if ((msg.starts_with("File `") && containsAny(msg, { "not found" }))
+            || msg.starts_with("I can't find file"))
             return "missing-file";
+        if (containsAny(msg, { "-shell-escape", "shell escape", "\\write18" }))
+            return "shell-escape-required";
         if (msg.starts_with("Package "))
             return "package";
         return { };
@@ -257,6 +261,113 @@ namespace {
         return SourceRef { displayFor(fs::path(token), workingDir), { } };
     }
 
+    // A package or class error continues on lines prefixed with its name:
+    //   ./main.tex:24: Package fontspec Error: The font "X" cannot be found;
+    //   (fontspec)                this may be but usually is not a fontspec bug.
+    // Appends those continuations (starting at lines[next]) to message.
+    std::string foldContinuation(std::string message,
+        const std::vector<std::string>& lines, size_t next)
+    {
+        static const std::regex kContinuation { R"(^\(([A-Za-z][\w.-]*)\)\s+(.*)$)" };
+        for (size_t j = next; j < lines.size(); ++j) {
+            std::smatch m;
+            if (!std::regex_match(lines[j], m, kContinuation))
+                break;
+            auto text = m[2].str();
+            if (text.empty())
+                continue;
+            if (!message.empty() && message.back() != ' ')
+                message += ' ';
+            message += text;
+        }
+        return message;
+    }
+
+    // The name between `…' in "File `minted.sty' not found" or "I can't
+    // find file `chapter'".
+    std::string quotedName(std::string_view message)
+    {
+        auto open = message.find('`');
+        auto close = message.find('\'', open == std::string_view::npos ? 0 : open);
+        if (open == std::string_view::npos || close == std::string_view::npos)
+            return { };
+        return std::string(message.substr(open + 1, close - open - 1));
+    }
+
+    // The line of `source` that loads `name` (a .sty via \usepackage or
+    // \RequirePackage, a .cls via \documentclass), or -1.
+    int loadingLine(const fs::path& source, const fs::path& name)
+    {
+        std::ifstream in(source);
+        if (!in)
+            return -1;
+        const auto stem = name.stem().string();
+        const bool isClass = name.extension() == ".cls";
+        std::string line;
+        for (int n = 1; std::getline(in, line); ++n) {
+            auto code = std::string_view(line).substr(0, line.find('%'));
+            bool loads = isClass ? code.contains("\\documentclass")
+                                 : (code.contains("\\usepackage") || code.contains("\\RequirePackage"));
+            if (!loads)
+                continue;
+            // The name as a whole entry of the brace list.
+            auto brace = code.find('{');
+            if (brace == std::string_view::npos)
+                continue;
+            auto list = code.substr(brace + 1, code.find('}', brace) - brace - 1);
+            while (!list.empty()) {
+                auto comma = list.find(',');
+                auto entry = list.substr(0, comma);
+                while (!entry.empty() && entry.front() == ' ')
+                    entry.remove_prefix(1);
+                while (!entry.empty() && entry.back() == ' ')
+                    entry.remove_suffix(1);
+                if (entry == stem)
+                    return n;
+                if (comma == std::string_view::npos)
+                    break;
+                list.remove_prefix(comma + 1);
+            }
+        }
+        return -1;
+    }
+
+    // Post-processing that needs the whole error list:
+    //  - "Emergency stop" only restates that an earlier error was fatal;
+    //  - a missing package is reported where TeX gave up (often a later
+    //    line), so point it at the line that loads it instead;
+    //  - errors that need a flag get a hint saying so.
+    void refineErrors(std::vector<Diagnostic>& diags, const fs::path& texFile)
+    {
+        auto isNoise = [](const Diagnostic& d) {
+            return d.message.starts_with("Emergency stop")
+                || d.message.starts_with("==> Fatal error occurred");
+        };
+        if (std::ranges::any_of(diags, [&](const Diagnostic& d) { return !isNoise(d); }))
+            std::erase_if(diags, isNoise);
+
+        for (auto& d : diags) {
+            if (d.category == "missing-file") {
+                d.missingFile = quotedName(d.message);
+                fs::path name { d.missingFile };
+                if (name.extension() == ".sty" || name.extension() == ".cls") {
+                    auto source = d.sourcePath.empty() ? texFile : d.sourcePath;
+                    if (int line = loadingLine(source, name); line > 0) {
+                        d.line = line;
+                        if (d.sourcePath.empty()) {
+                            d.sourcePath = texFile;
+                            d.file = texFile.filename().string();
+                        }
+                    }
+                }
+            } else if (d.category == "shell-escape-required") {
+                d.hint = "rebuild with --shell-escape (or set `shell-escape = true` in "
+                         "maketex.toml) — this lets the document run programs, so only "
+                         "for documents you trust";
+            }
+        }
+    }
+
     std::vector<Diagnostic> extractLatex(
         const std::string& output, const std::filesystem::path& texFile)
     {
@@ -292,7 +403,7 @@ namespace {
                 out.rawCtx += lines[j] + "\n";
 
             for (size_t j = i + 1; j < lines.size() && j <= i + kLookAhead; ++j) {
-                if (lines[j].starts_with("! "))
+                if (lines[j].starts_with("! ") || parseFileLineError(lines[j], workingDir))
                     break; // next error owns its own context
                 out.rawCtx += lines[j] + "\n";
                 if (lines[j].starts_with("l.")) {
@@ -317,7 +428,8 @@ namespace {
             if (auto fle = parseFileLineError(line, workingDir)) {
                 auto ctx = gatherContext(i);
                 auto ref = refForToken(fle->fileToken, workingDir);
-                std::string message = cleanErrorMessage(std::move(fle->message));
+                std::string message = cleanErrorMessage(
+                    foldContinuation(std::move(fle->message), lines, i + 1));
                 diags.push_back(Diagnostic {
                     .severity = Diagnostic::Severity::Error,
                     .file = ref.display,
@@ -335,7 +447,7 @@ namespace {
             // after '!' mark a continuation, not a new error).
             if (line.starts_with("! ") && !(line.size() > 2 && line[2] == ' ')) {
                 auto ctx = gatherContext(i);
-                std::string message = cleanErrorMessage(line.substr(2));
+                std::string message = cleanErrorMessage(foldContinuation(line.substr(2), lines, i + 1));
                 const auto& ref = stack.current();
                 diags.push_back(Diagnostic {
                     .severity = Diagnostic::Severity::Error,
@@ -352,6 +464,7 @@ namespace {
             stack.scan(line);
         }
 
+        refineErrors(diags, texFile);
         return diags;
     }
 
@@ -664,10 +777,43 @@ namespace {
 
 namespace diagnostics {
 
+    namespace {
+
+        // A run that never really happened (program missing) or was cut
+        // short has no log worth parsing; say what happened instead.
+        template <typename Inv>
+        std::optional<Diagnostic> abnormalRun(const RunResult<Inv>& result)
+        {
+            if (result.notFound)
+                return Diagnostic {
+                    .severity = Diagnostic::Severity::Error,
+                    .message = result.program + " is not installed (not found on PATH)",
+                    .category = "missing-tool",
+                    .missingFile = result.program,
+                };
+            if (result.timedOut)
+                return Diagnostic {
+                    .severity = Diagnostic::Severity::Error,
+                    .message = result.program + " was stopped: it ran longer than the timeout",
+                    .category = "timeout",
+                };
+            if (result.cancelled)
+                return Diagnostic {
+                    .severity = Diagnostic::Severity::Info,
+                    .message = "build cancelled",
+                    .category = "cancelled",
+                };
+            return std::nullopt;
+        }
+
+    } // namespace
+
     // ── public interface ──────────────────────────────────────────────────────────
 
     std::vector<Diagnostic> extract(const RunResult<EngineInvocation>& result)
     {
+        if (auto abnormal = abnormalRun(result))
+            return { *abnormal };
         std::vector<Diagnostic> diags;
 
         switch (result.kind) {
@@ -691,6 +837,8 @@ namespace diagnostics {
 
     std::vector<Diagnostic> extract(const RunResult<ToolInvocation>& result)
     {
+        if (auto abnormal = abnormalRun(result))
+            return { *abnormal };
         if (result.success())
             return { };
 

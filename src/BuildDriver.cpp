@@ -34,6 +34,7 @@ BuildDriver::BuildDriver(IEngine& engine,
     , m_tools(std::move(config.tools))
     , m_ignorePrefixes(std::move(config.ignorePrefixes))
     , m_observer(std::move(config.observer))
+    , m_processLimits(std::move(config.processLimits))
 {
 }
 
@@ -75,6 +76,19 @@ namespace {
             if (name.ends_with(ext))
                 return true;
         return false;
+    }
+
+    // "biber is not installed", "latex exited with code 1", …
+    template <typename Inv>
+    std::string failureMessage(const std::string& what, const RunResult<Inv>& r)
+    {
+        if (r.notFound)
+            return r.program + " is not installed (not found on PATH)";
+        if (r.cancelled)
+            return "cancelled";
+        if (r.timedOut)
+            return what + " timed out";
+        return what + " exited with code " + std::to_string(r.exitCode);
     }
 
     std::string key(const fs::path& p)
@@ -321,7 +335,7 @@ BuildDriver::ToolPassOutcome BuildDriver::runStaleTools(
         auto args = tool->buildArgs(toolInv);
         auto workingDir = toolInv.workingDir;
         auto toolResult = launchProcess(args, workingDir, tool->invokerKind(),
-            std::move(toolInv), toolEnv);
+            std::move(toolInv), toolEnv, m_processLimits);
         notify({ .kind = BuildEvent::Kind::ToolFinished,
             .toolName = std::string(tool->name()),
             .success = toolResult.success() });
@@ -437,8 +451,7 @@ DriverResult BuildDriver::run()
             result.lastError = "snapshot failed: " + outcome.snapshotError->message();
             return;
         }
-        result.lastError = outcome.failedToolName + " failed with exit code "
-            + std::to_string(outcome.failure->exitCode);
+        result.lastError = failureMessage(outcome.failedToolName, *outcome.failure);
         result.diagnostics = diagnostics::extract(*outcome.failure);
     };
 
@@ -456,8 +469,10 @@ DriverResult BuildDriver::run()
             // Persist any freshly computed states so the next invocation's
             // (mtime, size) fast path can skip rehashing.
             persistFileStates();
-            if (!tools.ranAny)
+            if (!tools.ranAny) {
                 notify({ .kind = BuildEvent::Kind::SkippedUpToDate });
+                result.upToDate = true;
+            }
             result.success = true;
             return result;
         }
@@ -478,7 +493,7 @@ DriverResult BuildDriver::run()
         // (epstopdf's figure-eps-converted-to.pdf) is generated, not edited.
         auto sourcesBefore = knownSources();
         auto passStart = fs::file_time_type::clock::now();
-        auto engineResult = m_engine.run(m_inv);
+        auto engineResult = m_engine.run(m_inv, m_processLimits);
         ++result.passes;
         notify({ .kind = BuildEvent::Kind::PassFinished,
             .pass = pass + 1,
@@ -486,8 +501,7 @@ DriverResult BuildDriver::run()
 
         if (!engineResult.success()) {
             latexRule.markRan(m_db, false, command);
-            result.lastError = "latex exited with code "
-                + std::to_string(engineResult.exitCode);
+            result.lastError = failureMessage("latex", engineResult);
             result.diagnostics = diagnostics::extract(engineResult);
             return result;
         }

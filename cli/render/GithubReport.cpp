@@ -99,12 +99,13 @@ void printGithubReport(const DriverResult& result, std::ostream& out)
             sep = ',';
         }
         out << sep << "title=LaTeX";
-        out << "::" << escapeData(d.message) << "\n";
+        auto message = d.hint.empty() ? d.message : d.message + "\nhint: " + d.hint;
+        out << "::" << escapeData(message) << "\n";
     }
 
     std::string passes = std::to_string(result.passes) + " pass"
         + (result.passes == 1 ? "" : "es");
-    if (result.success && result.passes == 0)
+    if (result.upToDate)
         out << "maketex: up to date\n";
     else if (result.success)
         out << "maketex: done in " << passes << "\n";

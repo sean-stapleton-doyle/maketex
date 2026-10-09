@@ -52,9 +52,7 @@ const std::vector<FixtureCase> kCases = {
     { .name = "pdflatex-simple" },
     { .name = "cross-references", .coldPasses = 2 },
     { .name = "toc", .coldPasses = 2 },
-    { .name = "input-include",
-        .coldPasses = 2,
-        .knownIssue = "\\include{chapters/x} needs outDir/chapters/ (plan #16)" },
+    { .name = "input-include", .coldPasses = 2 },
     { .name = "graphics-raster", .texFiles = { "graphicx.sty" } },
     { .name = "graphics-eps", .texFiles = { "epstopdf.sty" } },
     { .name = "pgfplots", .texFiles = { "pgfplots.sty" } },
@@ -271,6 +269,59 @@ TEST_F(IncrementalTest, jobnameInExtraOptionsIsHonoured)
 
     auto warm = fixture.build(options);
     EXPECT_TRUE(warm.upToDate);
+}
+
+// ── Zero-touch ──────────────────────────────────────────────────────────────
+
+TEST_F(IncrementalTest, unicodeDocumentPicksItsEngineUnasked)
+{
+    requirePrograms({ "lualatex" });
+    if (!hasTexFile("fontspec.sty") || !hasTexFile("lmroman10-regular.otf"))
+        GTEST_SKIP() << "not installed: fontspec / Latin Modern OpenType";
+    FixtureCopy fixture("xelatex-fontspec");
+    auto run = fixture.build(); // no engine set
+
+    ASSERT_TRUE(run.result.success) << run.result.lastError;
+    EXPECT_EQ(run.result.engine, EngineKind::LuaLaTeX);
+    EXPECT_EQ(run.result.engineReason, "loads fontspec");
+    EXPECT_FALSE(run.result.retriedEngine);
+}
+
+TEST_F(IncrementalTest, engineRequirementHiddenInAClassIsRetried)
+{
+    // The preamble scan cannot see into a class; the engine's own error
+    // tells maketex to switch.
+    requirePrograms({ "pdflatex", "lualatex" });
+    if (!hasTexFile("fontspec.sty") || !hasTexFile("lmroman10-regular.otf"))
+        GTEST_SKIP() << "not installed: fontspec / Latin Modern OpenType";
+    FixtureCopy fixture("pdflatex-simple");
+    fixture.write("unicodeart.cls",
+        "\\NeedsTeXFormat{LaTeX2e}\\ProvidesClass{unicodeart}\n"
+        "\\LoadClass{article}\n\\RequirePackage{fontspec}\n"
+        "\\setmainfont{lmroman10-regular.otf}\n");
+    fixture.write("main.tex",
+        "\\documentclass{unicodeart}\n\\begin{document}Hello\\end{document}\n");
+    auto run = fixture.build();
+
+    ASSERT_TRUE(run.result.success) << run.result.lastError;
+    EXPECT_EQ(run.result.engine, EngineKind::LuaLaTeX);
+    EXPECT_TRUE(run.result.retriedEngine);
+}
+
+TEST_F(IncrementalTest, documentsSharingADirectoryKeepTheirState)
+{
+    requirePrograms({ "pdflatex" });
+    FixtureCopy fixture("pdflatex-simple");
+    fixture.write("other.tex", "\\documentclass{article}\n\\begin{document}Other\\end{document}\n");
+    auto main = fixture.options("main.tex");
+    auto other = fixture.options("other.tex");
+    other.synctex = false; // different options → a different fingerprint
+
+    ASSERT_TRUE(fixture.build(main).result.success);
+    ASSERT_TRUE(fixture.build(other).result.success);
+    auto again = fixture.build(main);
+    EXPECT_TRUE(again.upToDate);
+    EXPECT_TRUE(again.result.diagnostics.empty()) << again.result.diagnostics.front().message;
 }
 
 INSTANTIATE_TEST_SUITE_P(Testdata, FixtureTest, ::testing::ValuesIn(kCases),

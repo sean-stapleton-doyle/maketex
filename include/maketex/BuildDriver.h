@@ -30,6 +30,8 @@ class IFileHasher;
 struct DriverResult {
     bool success = false;
     int passes = 0; // how many latex passes were run
+    // Nothing needed doing: no engine pass and no tool run.
+    bool upToDate = false;
     std::string lastError; // set on failure
     std::vector<Diagnostic> diagnostics; // extracted from engine/tool output
 };
@@ -62,6 +64,9 @@ public:
         std::vector<ITool*> tools;
         std::vector<std::filesystem::path> ignorePrefixes;
         BuildObserver observer;
+        // Applied to every engine and tool run: a per-process timeout and
+        // the token that cancels the build.
+        WaitLimits processLimits;
     };
 
     // engine, db, and hasher are non-owning — caller must ensure they
@@ -172,6 +177,7 @@ private:
     std::vector<ITool*> m_tools;
     std::vector<std::filesystem::path> m_ignorePrefixes;
     BuildObserver m_observer;
+    WaitLimits m_processLimits;
 
     BuildGraph m_graph;
 };

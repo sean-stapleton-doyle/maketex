@@ -2,8 +2,10 @@
 
 #include <toml++/toml.hpp>
 
+#include <cstdlib>
 #include <format>
 #include <fstream>
+#include <limits>
 #include <sstream>
 #include <utility>
 
@@ -18,10 +20,22 @@ std::optional<fs::path> findConfigFile(const fs::path& startDir)
     if (ec)
         return std::nullopt;
 
+    // The search is scoped to the project: it stops at the repository root
+    // (a directory holding .git, .hg, or .svn) and never reaches the home
+    // directory, so a stray ~/maketex.toml with `main` set cannot hijack
+    // builds of unrelated documents.
+    fs::path home;
+    if (const char* h = std::getenv("HOME"); h && *h)
+        home = fs::weakly_canonical(h, ec);
     while (true) {
+        if (!home.empty() && fs::weakly_canonical(dir, ec) == home)
+            return std::nullopt;
         fs::path candidate = dir / "maketex.toml";
         if (fs::is_regular_file(candidate, ec))
             return candidate;
+        for (const char* vcs : { ".git", ".hg", ".svn" })
+            if (fs::exists(dir / vcs, ec))
+                return std::nullopt;
         fs::path parent = dir.parent_path();
         if (parent == dir)
             return std::nullopt;
@@ -141,7 +155,7 @@ std::expected<Config, std::string> parseConfig(std::string_view toml,
 
     warnUnknownKeys(table, "",
         { "main", "engine", "output-dir", "tools", "shell-escape", "synctex",
-            "halt-on-error", "max-passes", "engine-args", "watch", "clean" },
+            "halt-on-error", "max-passes", "timeout", "engine-args", "watch", "clean" },
         sourceFile, config.warnings);
 
     if (auto main = getScalar<std::string>(table, "main", "string", errors))
@@ -175,12 +189,20 @@ std::expected<Config, std::string> parseConfig(std::string_view toml,
     config.synctex = getScalar<bool>(table, "synctex", "boolean", errors);
     config.haltOnError = getScalar<bool>(table, "halt-on-error", "boolean", errors);
 
-    if (auto passes = getScalar<int64_t>(table, "max-passes", "integer", errors)) {
-        if (*passes <= 0)
-            errors.add(*table.get("max-passes"), "`max-passes` must be positive");
-        else
-            config.maxPasses = static_cast<int>(*passes);
-    }
+    // Positive and small enough for an int: a huge TOML integer must not
+    // wrap into a tiny one.
+    auto positiveInt = [&](std::string_view key) -> std::optional<int> {
+        auto value = getScalar<int64_t>(table, key, "integer", errors);
+        if (!value)
+            return std::nullopt;
+        if (*value <= 0 || *value > std::numeric_limits<int>::max()) {
+            errors.add(*table.get(key), std::format("`{}` must be a positive integer", key));
+            return std::nullopt;
+        }
+        return static_cast<int>(*value);
+    };
+    config.maxPasses = positiveInt("max-passes");
+    config.timeoutSeconds = positiveInt("timeout");
 
     if (const toml::node* node = table.get("engine-args")) {
         if (const toml::table* engineArgs = node->as_table()) {

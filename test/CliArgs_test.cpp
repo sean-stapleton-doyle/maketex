@@ -147,3 +147,29 @@ TEST(ParseCliArgs, formatOptionRejectedOnWatch)
     EXPECT_FALSE(result.args.has_value());
     EXPECT_NE(result.exitCode, 0);
 }
+
+TEST(NormalizeArgv, helpWordShowsHelp)
+{
+    EXPECT_EQ(normalizeArgv(args({ "help" })), args({ "--help" }));
+}
+
+TEST(NormalizeArgv, subcommandAfterFlagsMovesToFront)
+{
+    EXPECT_EQ(normalizeArgv(args({ "--plain", "watch" })), args({ "watch", "--plain" }));
+}
+
+TEST(NormalizeArgv, subcommandWordAfterDocumentIsNotACommand)
+{
+    // The first non-flag is the document; nothing after it is re-read.
+    EXPECT_EQ(normalizeArgv(args({ "paper", "watch" }))[0], "build");
+}
+
+TEST(ParseCliArgs, negatedFlagsUndoConfig)
+{
+    auto result = parseCliArgs(args({ "build", "--no-shell-escape", "--no-synctex",
+        "--halt-on-error" }));
+    ASSERT_TRUE(result.args.has_value());
+    EXPECT_EQ(result.args->shellEscape, false);
+    EXPECT_EQ(result.args->synctex, false);
+    EXPECT_EQ(result.args->haltOnError, true);
+}

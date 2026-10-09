@@ -1,5 +1,7 @@
 #include "commands/WatchCommand.h"
 
+#include "PackageHints.h"
+
 #include "FileWatcher.h"
 #include "render/InlineReport.h"
 
@@ -29,7 +31,7 @@ namespace {
     struct LoopCallbacks {
         BuildObserver observer; // forwarded into BuildOptions; may be empty
         // result, wall-clock duration, number of watched paths
-        std::function<void(DriverResult, std::chrono::milliseconds, std::size_t)>
+        std::function<void(BuildResult, std::chrono::milliseconds, std::size_t)>
             onResult;
         // changed paths that triggered the next build (empty = forced rebuild)
         std::function<void(std::vector<fs::path>)> onRebuild;
@@ -42,12 +44,19 @@ namespace {
     {
         BuildOptions build = options.build;
         build.observer = callbacks.observer;
+        // Quitting interrupts the running engine pass rather than waiting
+        // for the build to converge.
+        build.stopToken = stopToken;
 
         while (!stopToken.stop_requested()) {
             auto start = Clock::now();
-            DriverResult result;
+            BuildResult result;
             try {
                 result = runBuild(build);
+                addInstallHints(result.diagnostics);
+                // Don't pay for the failing pdflatex attempt on every save.
+                if (result.retriedEngine)
+                    build.engine = result.engine;
             } catch (const std::exception& e) {
                 // Engine not installed, database trouble — surface it like a
                 // failed build instead of tearing down the watch session.
@@ -103,7 +112,7 @@ namespace {
         LoopCallbacks callbacks {
             .observer = { },
             .onResult =
-                [&](const DriverResult& result,
+                [&](const BuildResult& result,
                     std::chrono::milliseconds duration, std::size_t watched) {
                     if (styled) {
                         printInline(buildReport(result, options.build,
@@ -148,12 +157,15 @@ namespace {
         int currentPass = 0;
         std::string currentTool;
         bool skippedUpToDate = false;
-        DriverResult lastResult;
+        BuildResult lastResult;
         std::chrono::milliseconds lastDuration { };
         std::size_t watchedCount = 0;
         int buildCount = 0;
         std::vector<fs::path> lastChanged;
         bool verbose = false;
+        // Shown until the first build reports the engine it used; computed
+        // once, as detection reads the document.
+        std::string initialEngine;
     };
 
     Element statusLine(const WatchState& state)
@@ -198,7 +210,10 @@ namespace {
                    hbox(text("maketex watch ") | bold,
                        text(build.texFile.filename().string()),
                        text("  ·  ") | dim,
-                       text(std::string(engineKindName(build.engine))) | dim,
+                       text(state.buildCount == 0
+                               ? state.initialEngine
+                               : engineLabel(state.lastResult.engine, state.lastResult.engineReason))
+                           | dim,
                        filler(),
                        text("build #" + std::to_string(state.buildCount)) | dim),
                    separator(),
@@ -222,6 +237,8 @@ namespace {
 
         WatchState state;
         state.verbose = options.extras.verbose;
+        auto choice = chooseEngine(options.build);
+        state.initialEngine = engineLabel(choice.kind, choice.reason);
         std::mutex stateMutex;
 
         auto post = [&screen] { screen.PostEvent(Event::Custom); };
@@ -252,7 +269,7 @@ namespace {
                     post();
                 },
             .onResult =
-                [&](DriverResult result, std::chrono::milliseconds duration,
+                [&](BuildResult result, std::chrono::milliseconds duration,
                     std::size_t watched) {
                     {
                         std::lock_guard lock(stateMutex);

@@ -8,15 +8,23 @@
 #include <string>
 
 using maketex::BuildOptions;
+using maketex::BuildResult;
 using maketex::Diagnostic;
 using maketex::DriverResult;
 using maketex::EngineKind;
+using maketex::engineKindName;
 using maketex::cli::buildReport;
 using maketex::cli::diagnosticRow;
-using maketex::cli::engineKindName;
 using maketex::cli::useStyledOutput;
 
 namespace {
+
+BuildResult fromDriver(const DriverResult& driver)
+{
+    BuildResult result;
+    static_cast<DriverResult&>(result) = driver;
+    return result;
+}
 
 std::string renderToString(ftxui::Element element)
 {
@@ -30,20 +38,21 @@ std::string renderToString(ftxui::Element element)
 
 TEST(InlineReport, successReportShowsFileEngineAndPasses)
 {
-    DriverResult result { .success = true, .passes = 2 };
-    BuildOptions options { .texFile = "/tmp/thesis.tex",
-        .engine = EngineKind::LuaLaTeX };
+    auto result = fromDriver(DriverResult { .success = true, .passes = 2 });
+    result.engine = EngineKind::LuaLaTeX;
+    result.engineReason = "loads fontspec";
+    BuildOptions options { .texFile = "/tmp/thesis.tex" };
 
     auto rendered = renderToString(buildReport(result, options, false));
     EXPECT_NE(rendered.find("thesis.tex"), std::string::npos);
-    EXPECT_NE(rendered.find("lualatex"), std::string::npos);
+    EXPECT_NE(rendered.find("lualatex (loads fontspec)"), std::string::npos);
     EXPECT_NE(rendered.find("2 passes"), std::string::npos);
     EXPECT_NE(rendered.find("built"), std::string::npos);
 }
 
-TEST(InlineReport, zeroPassSuccessReadsUpToDate)
+TEST(InlineReport, upToDateReadsUpToDate)
 {
-    DriverResult result { .success = true, .passes = 0 };
+    auto result = fromDriver(DriverResult { .success = true, .passes = 0, .upToDate = true });
     BuildOptions options { .texFile = "/tmp/thesis.tex" };
 
     auto rendered = renderToString(buildReport(result, options, false));
@@ -53,9 +62,9 @@ TEST(InlineReport, zeroPassSuccessReadsUpToDate)
 
 TEST(InlineReport, failureReportShowsError)
 {
-    DriverResult result { .success = false,
+    auto result = fromDriver(DriverResult { .success = false,
         .passes = 1,
-        .lastError = "latex exited with code 1" };
+        .lastError = "latex exited with code 1" });
     BuildOptions options { .texFile = "/tmp/thesis.tex" };
 
     auto rendered = renderToString(buildReport(result, options, false));

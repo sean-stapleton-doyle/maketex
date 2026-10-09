@@ -18,6 +18,13 @@ struct Diagnostic {
     std::string category; // stable machine tag ("undefined-citation",
                           // "missing-file", "package", …); empty if untagged
     std::string rawContext; // surrounding log lines; shown only in verbose mode
+    // For "missing-file" / "missing-tool": the file or program that was not
+    // found (e.g. "minted.sty", "biber") — what a frontend looks up to
+    // suggest an install command.
+    std::string missingFile;
+    // An actionable next step, shown under the message ("rebuild with
+    // --shell-escape", "sudo tlmgr install minted"). Empty when none.
+    std::string hint;
 };
 
 } // namespace maketex

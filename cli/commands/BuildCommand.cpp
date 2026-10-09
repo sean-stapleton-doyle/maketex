@@ -1,5 +1,6 @@
 #include "commands/BuildCommand.h"
 
+#include "PackageHints.h"
 #include "render/GithubReport.h"
 #include "render/InlineReport.h"
 #include "render/JsonReport.h"
@@ -15,7 +16,7 @@ namespace maketex::cli {
 
 namespace {
 
-    void printHumanReport(const DriverResult& result,
+    void printHumanReport(const BuildResult& result,
         const EffectiveOptions& options)
     {
         if (useStyledOutput(options.extras.plain)) {
@@ -27,18 +28,27 @@ namespace {
         // I/O the library formatter deliberately avoids) lands under its
         // diagnostic, not after the whole list.
         for (const auto& diagnostic : result.diagnostics) {
-            diagnostics::format({ diagnostic }, std::cerr,
+            // The hint goes last, under the quoted source line.
+            auto withoutHint = diagnostic;
+            withoutHint.hint.clear();
+            diagnostics::format({ withoutHint }, std::cerr,
                 options.extras.verbose ? diagnostics::Verbosity::Verbose
                                        : diagnostics::Verbosity::Normal);
             if (auto snippet
                 = readSourceLine(diagnostic.sourcePath, diagnostic.line))
                 std::cerr << std::format("  {:>4} | {}\n", diagnostic.line,
                     *snippet);
+            if (!diagnostic.hint.empty())
+                std::cerr << "  hint: " << diagnostic.hint << "\n";
         }
+        if (!result.engineReason.empty())
+            std::cerr << "maketex: engine " << engineLabel(result.engine, result.engineReason) << "\n";
         std::string passes = std::to_string(result.passes) + " pass"
             + (result.passes == 1 ? "" : "es");
-        if (result.success && result.passes == 0)
+        if (result.upToDate)
             std::cout << "maketex: up to date\n";
+        else if (result.success && result.passes == 0)
+            std::cout << "maketex: done (tools only, no engine pass needed)\n";
         else if (result.success)
             std::cout << "maketex: done in " << passes << "\n";
         else
@@ -51,6 +61,7 @@ namespace {
 int runBuildCommand(const EffectiveOptions& options)
 {
     auto result = runBuild(options.build);
+    addInstallHints(result.diagnostics);
 
     switch (options.extras.format) {
     case OutputFormat::Json:

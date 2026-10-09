@@ -77,6 +77,7 @@ add_library(maketex STATIC
     src/tools/HashTriggeredTool.cpp
     src/DiagnosticExtractor.cpp
     src/DiagnosticFormatter.cpp
+    src/DocumentProbe.cpp
     src/Blake3Hasher.cpp
     src/FileStateTracker.cpp
     src/parsers/FlsParser.cpp

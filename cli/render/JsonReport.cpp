@@ -4,6 +4,8 @@
 
 #include <nlohmann/json.hpp>
 
+#include <algorithm>
+
 #include <ostream>
 
 namespace fs = std::filesystem;
@@ -27,27 +29,27 @@ namespace {
 
 } // namespace
 
-void printJsonReport(const DriverResult& result, const BuildOptions& options,
+void printJsonReport(const BuildResult& result, const BuildOptions& options,
     std::ostream& out)
 {
     nlohmann::json doc;
     doc["formatVersion"] = 1;
     doc["success"] = result.success;
-    doc["upToDate"] = result.success && result.passes == 0;
+    doc["upToDate"] = result.upToDate;
     doc["passes"] = result.passes;
     doc["error"] = result.success ? nlohmann::json(nullptr)
                                   : nlohmann::json(result.lastError);
     doc["document"] = options.texFile.string();
-    doc["engine"] = engineKindName(options.engine);
+    doc["engine"] = engineKindName(result.engine);
+    doc["engineReason"] = result.engineReason.empty() ? nlohmann::json(nullptr)
+                                                      : nlohmann::json(result.engineReason);
 
-    // Default mode publishes the PDF beside the tex file; an explicit
-    // output dir keeps it inside.
-    fs::path pdfDir = options.usesDefaultOutputDir()
-        ? options.texFile.parent_path()
-        : options.outputDir;
-    fs::path pdf = pdfDir / (options.texFile.stem().string() + ".pdf");
-    doc["pdf"] = result.success ? nlohmann::json(pdf.string())
-                                : nlohmann::json(nullptr);
+    // Only a PDF that actually reached its user-facing location: a failed
+    // publish (read-only directory) reports null rather than a stale path.
+    auto pdf = std::ranges::find_if(result.published,
+        [](const fs::path& p) { return p.extension() == ".pdf"; });
+    doc["pdf"] = pdf != result.published.end() ? nlohmann::json(pdf->string())
+                                               : nlohmann::json(nullptr);
 
     auto& diagnostics = doc["diagnostics"] = nlohmann::json::array();
     for (const auto& d : result.diagnostics) {
@@ -63,6 +65,7 @@ void printJsonReport(const DriverResult& result, const BuildOptions& options,
         entry["message"] = d.message;
         entry["category"] = d.category;
         entry["context"] = d.rawContext;
+        entry["hint"] = d.hint.empty() ? nlohmann::json(nullptr) : nlohmann::json(d.hint);
         diagnostics.push_back(std::move(entry));
     }
 

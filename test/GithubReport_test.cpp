@@ -76,6 +76,6 @@ TEST(GithubReport, filePropertyEscapesCommaAndColon)
 
 TEST(GithubReport, upToDateSummary)
 {
-    DriverResult result { .success = true, .passes = 0 };
+    DriverResult result { .success = true, .passes = 0, .upToDate = true };
     EXPECT_EQ(report(result), "maketex: up to date\n");
 }

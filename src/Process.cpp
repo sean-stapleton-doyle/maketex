@@ -63,8 +63,17 @@ Process::Process(std::span<const std::string> argv,
     posix_spawn_file_actions_init(&fa);
     if (!workingDir.empty())
         posix_spawn_file_actions_addchdir(&fa, workingDir.c_str());
+    posix_spawn_file_actions_addopen(&fa, STDIN_FILENO, "/dev/null", O_RDONLY, 0);
     posix_spawn_file_actions_adddup2(&fa, pOut[1], STDOUT_FILENO);
     posix_spawn_file_actions_adddup2(&fa, pErr[1], STDERR_FILENO);
+
+    posix_spawnattr_t attr;
+    posix_spawnattr_init(&attr);
+#ifdef POSIX_SPAWN_CLOEXEC_DEFAULT
+    // macOS: the child gets only the descriptors set up above, never one
+    // the parent happens to hold (the state database, a watched file).
+    posix_spawnattr_setflags(&attr, POSIX_SPAWN_CLOEXEC_DEFAULT);
+#endif
 
     std::vector<char*> cargv;
     cargv.reserve(argv.size() + 1);
@@ -102,8 +111,9 @@ Process::Process(std::span<const std::string> argv,
     }
 
     pid_t pid;
-    int err = ::posix_spawnp(&pid, cargv[0], &fa, nullptr, cargv.data(), cenvp);
+    int err = ::posix_spawnp(&pid, cargv[0], &fa, &attr, cargv.data(), cenvp);
     posix_spawn_file_actions_destroy(&fa);
+    posix_spawnattr_destroy(&attr);
 
     if (err != 0)
         throw std::system_error(err, std::system_category(),
@@ -140,26 +150,18 @@ Process& Process::operator=(Process&& other) noexcept
 
 Process::~Process()
 {
-    if (m_pid != -1) {
-        ::kill(m_pid, SIGTERM);
-        // Close our pipe ends before waitpid so the child isn't blocked
-        // trying to write into a full kernel buffer.
-        if (m_stdoutFd != -1) {
-            ::close(m_stdoutFd);
-            m_stdoutFd = -1;
-        }
-        if (m_stderrFd != -1) {
-            ::close(m_stderrFd);
-            m_stderrFd = -1;
-        }
-        int status;
-        ::waitpid(m_pid, &status, 0);
-        m_pid = -1;
-    }
-    if (m_stdoutFd != -1)
+    // Close our pipe ends first so a child blocked writing into a full pipe
+    // sees EPIPE instead of hanging the reap.
+    if (m_stdoutFd != -1) {
         ::close(m_stdoutFd);
-    if (m_stderrFd != -1)
+        m_stdoutFd = -1;
+    }
+    if (m_stderrFd != -1) {
         ::close(m_stderrFd);
+        m_stderrFd = -1;
+    }
+    if (m_pid != -1)
+        terminateAndReap();
 }
 
 void Process::kill() noexcept
@@ -168,8 +170,32 @@ void Process::kill() noexcept
         ::kill(m_pid, SIGTERM);
 }
 
-ProcessResult Process::wait()
+int Process::terminateAndReap() noexcept
 {
+    using namespace std::chrono_literals;
+    int status = 0;
+    ::kill(m_pid, SIGTERM);
+    // TeX and the tools exit promptly on SIGTERM; something wedged (a
+    // shell-escape child ignoring signals) gets SIGKILL after the grace.
+    auto deadline = std::chrono::steady_clock::now() + 2s;
+    while (true) {
+        pid_t r = ::waitpid(m_pid, &status, WNOHANG);
+        if (r == m_pid || (r < 0 && errno != EINTR))
+            break;
+        if (std::chrono::steady_clock::now() >= deadline) {
+            ::kill(m_pid, SIGKILL);
+            while (::waitpid(m_pid, &status, 0) < 0 && errno == EINTR) { }
+            break;
+        }
+        ::usleep(10'000);
+    }
+    m_pid = -1;
+    return status;
+}
+
+ProcessResult Process::wait(const WaitLimits& limits)
+{
+    using Clock = std::chrono::steady_clock;
     ProcessResult result;
 
     struct pollfd fds[2] = {
@@ -188,10 +214,25 @@ ProcessResult Process::wait()
         --open;
     };
 
+    std::optional<Clock::time_point> deadline;
+    if (limits.timeout)
+        deadline = Clock::now() + *limits.timeout;
+    // With a limit to watch, wake periodically to check it; otherwise block.
+    const bool limited = deadline || limits.stop.stop_possible();
+    constexpr int kSliceMs = 100;
+
     std::array<char, 65536> buf;
 
     while (open > 0) {
-        int n = ::poll(fds, 2, -1);
+        if (limits.stop.stop_requested()) {
+            result.cancelled = true;
+            break;
+        }
+        if (deadline && Clock::now() >= *deadline) {
+            result.timedOut = true;
+            break;
+        }
+        int n = ::poll(fds, 2, limited ? kSliceMs : -1);
         if (n < 0) {
             if (errno == EINTR)
                 continue;
@@ -202,16 +243,23 @@ ProcessResult Process::wait()
                 continue;
             if (fds[i].revents & (POLLIN | POLLHUP)) {
                 ssize_t r = ::read(fds[i].fd, buf.data(), buf.size());
-                if (r > 0) {
+                if (r > 0)
                     bufs[i]->append(buf.data(), static_cast<size_t>(r));
-                } else {
-                    // r == 0: EOF. r < 0 after POLLIN is unexpected; close anyway.
-                    closeEnd(i);
-                }
+                else if (r == 0 || errno != EINTR)
+                    closeEnd(i); // EOF, or a real read error
             } else if (fds[i].revents & (POLLERR | POLLNVAL)) {
                 closeEnd(i);
             }
         }
+    }
+
+    if (result.cancelled || result.timedOut) {
+        for (int i = 0; i < 2; ++i)
+            if (fds[i].fd >= 0)
+                closeEnd(i);
+        terminateAndReap();
+        result.exitCode = -1;
+        return result;
     }
 
     int status = 0;

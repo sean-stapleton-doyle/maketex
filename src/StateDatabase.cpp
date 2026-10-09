@@ -2,6 +2,8 @@
 
 #include <cstring>
 #include <stdexcept>
+#include <string_view>
+#include <vector>
 
 namespace maketex {
 
@@ -55,7 +57,7 @@ StateDatabase::StateDatabase(std::unique_ptr<SQLite::Database> db,
     m_db->exec("PRAGMA journal_mode=WAL");
     m_db->exec("PRAGMA foreign_keys=ON");
     applySchema();
-    resetIncompatibleState(config.fingerprint);
+    resetIncompatibleState(config.fingerprint, config.jobName);
 }
 
 void StateDatabase::applySchema()
@@ -83,12 +85,14 @@ void StateDatabase::setMeta(const std::string& key, const std::string& value)
     s.exec();
 }
 
-void StateDatabase::resetIncompatibleState(const std::string& fingerprint)
+void StateDatabase::resetIncompatibleState(const std::string& fingerprint,
+    const std::string& jobName)
 {
     auto storedVersion = getMeta("schema_version");
-    auto storedFingerprint = getMeta("fingerprint");
+    const std::string fingerprintKey = jobName.empty() ? "fingerprint" : "fingerprint:" + jobName;
+    auto storedFingerprint = getMeta(fingerprintKey);
 
-    bool incompatible = false;
+    bool schemaIncompatible = false;
     if (!storedVersion.has_value()) {
         // No manifest: either a brand-new database or one written before
         // the meta table existed (schema v1, absolute paths). The latter
@@ -96,25 +100,51 @@ void StateDatabase::resetIncompatibleState(const std::string& fingerprint)
         SQLite::Statement q(*m_db,
             "SELECT EXISTS (SELECT 1 FROM file_states)"
             " OR EXISTS (SELECT 1 FROM rules)");
-        incompatible = q.executeStep() && q.getColumn(0).getInt() != 0;
+        schemaIncompatible = q.executeStep() && q.getColumn(0).getInt() != 0;
     } else {
-        incompatible = *storedVersion != std::to_string(kSchemaVersion)
-            || (!fingerprint.empty() && storedFingerprint.has_value()
-                && *storedFingerprint != fingerprint);
+        schemaIncompatible = *storedVersion != std::to_string(kSchemaVersion);
     }
+    bool fingerprintChanged = !fingerprint.empty() && storedFingerprint.has_value()
+        && *storedFingerprint != fingerprint;
 
     SQLite::Transaction tx(*m_db);
-    if (incompatible) {
-        // Never try to migrate: wrong state silently corrupts incremental
-        // decisions, while an empty database merely costs one full build.
+    // Never try to migrate: wrong state silently corrupts incremental
+    // decisions, while an empty database merely costs one full build.
+    if (schemaIncompatible) {
         m_db->exec("DELETE FROM rule_inputs;"
                    "DELETE FROM rules;"
-                   "DELETE FROM file_states;");
+                   "DELETE FROM file_states;"
+                   "DELETE FROM meta;");
+        m_wasReset = true;
+    } else if (fingerprintChanged) {
+        // Only this job's rules: every rule name ends in ":<job>", plus a
+        // "#…" suffix for derived records. file_states is a pure content
+        // cache and stays valid.
+        if (jobName.empty()) {
+            m_db->exec("DELETE FROM rule_inputs; DELETE FROM rules;");
+        } else {
+            std::vector<std::string> doomed;
+            SQLite::Statement q(*m_db, "SELECT name FROM rules");
+            const std::string suffix = ":" + jobName;
+            while (q.executeStep()) {
+                std::string name = q.getColumn(0).getString();
+                std::string_view base = name;
+                base = base.substr(0, base.find('#'));
+                if (base.ends_with(suffix))
+                    doomed.push_back(std::move(name));
+            }
+            SQLite::Statement del(*m_db, "DELETE FROM rules WHERE name = ?");
+            for (const auto& name : doomed) {
+                del.bind(1, name);
+                del.exec();
+                del.reset();
+            }
+        }
         m_wasReset = true;
     }
     setMeta("schema_version", std::to_string(kSchemaVersion));
     if (!fingerprint.empty() || !storedFingerprint.has_value())
-        setMeta("fingerprint", fingerprint);
+        setMeta(fingerprintKey, fingerprint);
 #ifdef MAKETEX_VERSION
     setMeta("maketex_version", MAKETEX_VERSION); // informational only
 #endif

@@ -21,6 +21,9 @@ enum class EngineKind {
 // kind, or nullopt for unknown names — callers own the error reporting.
 std::optional<EngineKind> parseEngineKind(std::string_view name);
 
+// The config/CLI name of kind — the inverse of parseEngineKind.
+std::string_view engineKindName(EngineKind kind);
+
 // Constructs the engine for kind. Total: every EngineKind yields an engine.
 std::unique_ptr<EngineBase> createEngine(EngineKind kind,
     EngineArguments arguments = { });

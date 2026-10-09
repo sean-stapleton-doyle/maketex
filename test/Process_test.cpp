@@ -1,7 +1,14 @@
 #include "maketex/Process.h"
 
+#include "maketex/Launch.h"
+#include "maketex/ToolInvocation.h"
+
 #include <gtest/gtest.h>
+
+#include <chrono>
+#include <stop_token>
 #include <string>
+#include <thread>
 #include <vector>
 
 using maketex::Process;
@@ -111,4 +118,53 @@ TEST(Process, emptyExtraEnvInheritsEnvironment)
     auto r = p.wait();
     EXPECT_EQ(r.exitCode, 0);
     EXPECT_NE(r.stdoutOutput, "\n");
+}
+
+TEST(ProcessTest, timeoutKillsAHungProcess)
+{
+    using namespace std::chrono_literals;
+    std::vector<std::string> args { "sleep", "30" };
+    auto start = std::chrono::steady_clock::now();
+    auto result = maketex::Process(args).wait({ .timeout = 200ms });
+    auto elapsed = std::chrono::steady_clock::now() - start;
+
+    EXPECT_TRUE(result.timedOut);
+    EXPECT_EQ(result.exitCode, -1);
+    EXPECT_LT(elapsed, 5s);
+}
+
+TEST(ProcessTest, stopTokenCancelsTheProcess)
+{
+    using namespace std::chrono_literals;
+    std::stop_source stop;
+    std::jthread canceller([&] {
+        std::this_thread::sleep_for(100ms);
+        stop.request_stop();
+    });
+    std::vector<std::string> args { "sleep", "30" };
+    auto result = maketex::Process(args).wait({ .stop = stop.get_token() });
+
+    EXPECT_TRUE(result.cancelled);
+    EXPECT_FALSE(result.timedOut);
+}
+
+TEST(ProcessTest, stdinIsNotTheTerminal)
+{
+    // `cat` with no arguments copies stdin: from /dev/null it exits at once
+    // with no output instead of waiting on the user's terminal.
+    std::vector<std::string> args { "cat" };
+    auto result = maketex::Process(args).wait({ .timeout = std::chrono::seconds(5) });
+    EXPECT_FALSE(result.timedOut);
+    EXPECT_EQ(result.exitCode, 0);
+    EXPECT_TRUE(result.stdoutOutput.empty());
+}
+
+TEST(LaunchProcessTest, missingProgramIsReportedNotThrown)
+{
+    std::vector<std::string> args { "maketex-no-such-program-xyz" };
+    auto result = maketex::launchProcess(args, { }, maketex::InvokerKind::Biber,
+        maketex::ToolInvocation { });
+    EXPECT_TRUE(result.notFound);
+    EXPECT_EQ(result.exitCode, 127);
+    EXPECT_EQ(result.program, "maketex-no-such-program-xyz");
 }

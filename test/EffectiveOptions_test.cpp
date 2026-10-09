@@ -4,7 +4,9 @@
 
 #include <gtest/gtest.h>
 
+#include <expected>
 #include <filesystem>
+#include <string>
 
 namespace fs = std::filesystem;
 using maketex::EngineKind;
@@ -43,10 +45,10 @@ TEST_F(EffectiveOptionsTest, defaultsHoldWithoutFlagsOrConfig)
     auto options = assembleOptions(argsWithFile(), std::nullopt);
     ASSERT_TRUE(options.has_value()) << options.error();
     EXPECT_EQ(options->build.texFile, fs::absolute(m_texFile));
-    EXPECT_EQ(options->build.engine, EngineKind::PdfLaTeX);
+    EXPECT_FALSE(options->build.engine.has_value()); // detected at build time
     EXPECT_TRUE(options->build.haltOnError);
     EXPECT_FALSE(options->build.shellEscape);
-    EXPECT_FALSE(options->build.synctex);
+    EXPECT_TRUE(options->build.synctex);
     EXPECT_EQ(options->build.maxPasses, maketex::BuildDriver::kDefaultMaxPasses);
     EXPECT_EQ(options->extras.watchIntervalMs, 300);
 }
@@ -113,13 +115,6 @@ TEST_F(EffectiveOptionsTest, positionalBeatsConfigMain)
     auto options = assembleOptions(argsWithFile(), config);
     ASSERT_TRUE(options.has_value()) << options.error();
     EXPECT_EQ(options->build.texFile, fs::absolute(m_texFile));
-}
-
-TEST_F(EffectiveOptionsTest, missingInputFileIsAnError)
-{
-    auto options = assembleOptions(CliArgs { }, std::nullopt);
-    ASSERT_FALSE(options.has_value());
-    EXPECT_NE(options.error().find("no input file"), std::string::npos);
 }
 
 TEST_F(EffectiveOptionsTest, nonexistentFileIsAnError)
@@ -220,4 +215,101 @@ TEST_F(EffectiveOptionsTest, unknownFormatIsRejected)
     auto options = assembleOptions(args, std::nullopt);
     ASSERT_FALSE(options.has_value());
     EXPECT_NE(options.error().find("unknown format"), std::string::npos);
+}
+
+// ── Document discovery ───────────────────────────────────────────────────────
+
+namespace {
+
+class DocumentDiscoveryTest : public maketex::test_utils::TempDirFixture {
+protected:
+    const char* dirName() const override { return "maketex_discovery_test"; }
+
+    void SetUp() override
+    {
+        TempDirFixture::SetUp();
+        m_previousCwd = fs::current_path();
+        fs::current_path(m_dir);
+    }
+
+    void TearDown() override
+    {
+        fs::current_path(m_previousCwd);
+        TempDirFixture::TearDown();
+    }
+
+    std::expected<fs::path, std::string> resolve(CliArgs args = { }) const
+    {
+        auto options = assembleOptions(args, std::nullopt);
+        if (!options)
+            return std::unexpected(options.error());
+        return options->build.texFile;
+    }
+
+    fs::path m_previousCwd;
+};
+
+} // namespace
+
+TEST_F(DocumentDiscoveryTest, singleDocumentInCwdIsBuilt)
+{
+    writeFile("paper.tex", "% a header comment\n\\documentclass{article}\n");
+    writeFile("chapter.tex", "\\section{Not a root}\n");
+    auto found = resolve();
+    ASSERT_TRUE(found.has_value()) << found.error();
+    EXPECT_EQ(found->filename(), "paper.tex");
+}
+
+TEST_F(DocumentDiscoveryTest, mainTexBreaksATie)
+{
+    writeFile("main.tex", "\\documentclass{article}\n");
+    writeFile("notes.tex", "\\documentclass{article}\n");
+    auto found = resolve();
+    ASSERT_TRUE(found.has_value()) << found.error();
+    EXPECT_EQ(found->filename(), "main.tex");
+}
+
+TEST_F(DocumentDiscoveryTest, ambiguousDocumentsAreListed)
+{
+    writeFile("a.tex", "\\documentclass{article}\n");
+    writeFile("b.tex", "\\documentclass{article}\n");
+    auto found = resolve();
+    ASSERT_FALSE(found.has_value());
+    EXPECT_NE(found.error().find("a.tex, b.tex"), std::string::npos) << found.error();
+}
+
+TEST_F(DocumentDiscoveryTest, emptyDirectoryIsAnError)
+{
+    auto found = resolve();
+    ASSERT_FALSE(found.has_value());
+    EXPECT_NE(found.error().find("no LaTeX document"), std::string::npos) << found.error();
+}
+
+TEST_F(DocumentDiscoveryTest, commentedDocumentclassDoesNotCount)
+{
+    writeFile("draft.tex", "% \\documentclass{article}\n");
+    EXPECT_FALSE(resolve().has_value());
+}
+
+TEST_F(DocumentDiscoveryTest, extensionIsOptional)
+{
+    writeFile("thesis.tex", "\\documentclass{book}\n");
+    CliArgs args;
+    args.texFile = "thesis";
+    auto found = resolve(args);
+    ASSERT_TRUE(found.has_value()) << found.error();
+    EXPECT_EQ(found->filename(), "thesis.tex");
+}
+
+TEST_F(DocumentDiscoveryTest, texRootCommentRedirectsToTheRoot)
+{
+    // What an editor does when the user builds from a chapter.
+    writeFile("thesis.tex", "\\documentclass{book}\n\\include{chapters/one}\n");
+    fs::create_directories(m_dir / "chapters");
+    writeFile("chapters/one.tex", "% !TEX root = ../thesis.tex\n\\chapter{One}\n");
+    CliArgs args;
+    args.texFile = "chapters/one.tex";
+    auto found = resolve(args);
+    ASSERT_TRUE(found.has_value()) << found.error();
+    EXPECT_EQ(fs::weakly_canonical(*found), fs::weakly_canonical(m_dir / "thesis.tex"));
 }

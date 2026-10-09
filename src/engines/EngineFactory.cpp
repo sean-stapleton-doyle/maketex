@@ -19,6 +19,19 @@ std::optional<EngineKind> parseEngineKind(std::string_view name)
     return std::nullopt;
 }
 
+std::string_view engineKindName(EngineKind kind)
+{
+    switch (kind) {
+    case EngineKind::PdfLaTeX:
+        return "pdflatex";
+    case EngineKind::XeLaTeX:
+        return "xelatex";
+    case EngineKind::LuaLaTeX:
+        return "lualatex";
+    }
+    std::unreachable();
+}
+
 std::unique_ptr<EngineBase> createEngine(EngineKind kind,
     EngineArguments arguments)
 {
