@@ -4,6 +4,7 @@
 #include "maketex/RunResult.h"
 
 #include <filesystem>
+#include <span>
 #include <string>
 #include <utility>
 #include <vector>
@@ -18,9 +19,10 @@ template <typename Inv>
 RunResult<Inv> launchProcess(const std::vector<std::string>& args,
     const std::filesystem::path& workDir,
     InvokerKind kind,
-    Inv invocation)
+    Inv invocation,
+    std::span<const std::pair<std::string, std::string>> extraEnv = { })
 {
-    auto pr = Process(args, workDir).wait();
+    auto pr = Process(args, workDir, extraEnv).wait();
     return RunResult<Inv> {
         .invocation = std::move(invocation),
         .kind = kind,

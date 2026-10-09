@@ -1,5 +1,7 @@
 #include "maketex/parsers/FlsParser.h"
 
+#include "test_utils.h"
+
 #include <gtest/gtest.h>
 
 #include <algorithm>
@@ -7,7 +9,6 @@
 #include <fstream>
 
 using maketex::FlsParser;
-using maketex::FlsRecord;
 namespace fs = std::filesystem;
 
 namespace {
@@ -18,7 +19,7 @@ protected:
 
     void SetUp() override
     {
-        m_dir = fs::temp_directory_path() / "maketex_fls_test";
+        m_dir = maketex::test_utils::uniqueTempDir("maketex_fls_test");
         fs::create_directories(m_dir);
     }
 
@@ -142,9 +143,95 @@ TEST_F(FlsParserTest, multipleIgnorePrefixes)
     EXPECT_EQ(rec.inputs[0].filename(), "main.tex");
 }
 
+TEST_F(FlsParserTest, ignoredPrefixLongerThanPathDoesNotOverrun)
+{
+    // Regression for the C++14 std::mismatch overload, which read past the
+    // path's end when the ignore prefix was longer than the path itself.
+    // Such an input must simply be kept (not ignored), with no UB.
+    fs::path longPrefix = m_dir / "texmf" / "tree" / "deep";
+    auto fls = writeFls("main.fls",
+        "PWD " + m_dir.string() + "\n"
+                                  "INPUT /a\n"
+                                  "INPUT main.tex\n");
+
+    auto parsed = FlsParser { }.addIgnorePrefix(longPrefix).parse(fls);
+    ASSERT_TRUE(parsed.has_value());
+    const auto& rec = parsed.value();
+
+    // Both inputs kept: /a is shorter than the prefix and must not match.
+    ASSERT_EQ(rec.inputs.size(), 2u);
+    EXPECT_EQ(rec.inputs[0], fs::path("/a"));
+    EXPECT_EQ(rec.inputs[1].filename(), "main.tex");
+}
+
 TEST_F(FlsParserTest, missingFileReturnsError)
 {
     auto parsed = FlsParser { }.parse(m_dir / "nonexistent.fls");
     ASSERT_FALSE(parsed.has_value());
     EXPECT_EQ(parsed.error(), std::errc::no_such_file_or_directory);
+}
+
+// ── overridePwd ───────────────────────────────────────────────────────────────
+
+TEST_F(FlsParserTest, overridePwdRebasesRelativeEntries)
+{
+    auto fls = writeFls("main.fls",
+        "PWD /old/checkout\n"
+        "INPUT ./main.tex\n"
+        "OUTPUT ./main.pdf\n");
+
+    FlsParser parser;
+    parser.overridePwd(m_dir);
+    auto rec = parser.parse(fls);
+    ASSERT_TRUE(rec.has_value());
+
+    ASSERT_EQ(rec->inputs.size(), 1u);
+    EXPECT_EQ(rec->inputs[0], fs::weakly_canonical(m_dir / "main.tex"));
+    ASSERT_EQ(rec->outputs.size(), 1u);
+    EXPECT_EQ(rec->outputs[0], fs::weakly_canonical(m_dir / "main.pdf"));
+}
+
+TEST_F(FlsParserTest, overridePwdRebasesAbsoluteEntriesUnderRecordedPwd)
+{
+    auto fls = writeFls("main.fls",
+        "PWD /old/checkout\n"
+        "INPUT /old/checkout/chapters/ch1.tex\n");
+
+    FlsParser parser;
+    parser.overridePwd(m_dir);
+    auto rec = parser.parse(fls);
+    ASSERT_TRUE(rec.has_value());
+
+    ASSERT_EQ(rec->inputs.size(), 1u);
+    EXPECT_EQ(rec->inputs[0],
+        fs::weakly_canonical(m_dir / "chapters/ch1.tex"));
+}
+
+TEST_F(FlsParserTest, overridePwdLeavesSystemPathsAlone)
+{
+    auto fls = writeFls("main.fls",
+        "PWD /old/checkout\n"
+        "INPUT /usr/share/texmf/article.cls\n");
+
+    FlsParser parser;
+    parser.overridePwd(m_dir);
+    auto rec = parser.parse(fls);
+    ASSERT_TRUE(rec.has_value());
+
+    ASSERT_EQ(rec->inputs.size(), 1u);
+    EXPECT_EQ(rec->inputs[0], fs::path("/usr/share/texmf/article.cls"));
+}
+
+TEST_F(FlsParserTest, overridePwdMatchingRecordedPwdIsANoOp)
+{
+    auto fls = writeFls("main.fls",
+        "PWD " + m_dir.string() + "\n"
+                                  "INPUT ./main.tex\n");
+
+    FlsParser parser;
+    parser.overridePwd(m_dir);
+    auto rec = parser.parse(fls);
+    ASSERT_TRUE(rec.has_value());
+    ASSERT_EQ(rec->inputs.size(), 1u);
+    EXPECT_EQ(rec->inputs[0], fs::weakly_canonical(m_dir / "main.tex"));
 }

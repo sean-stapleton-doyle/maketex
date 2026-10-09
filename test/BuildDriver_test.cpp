@@ -95,7 +95,7 @@ public:
     }
 
     std::string_view name() const override { return "fake"; }
-    maketex::InvokerKind invokerKind() const override { return InvokerKind::PdfLatex; }
+    maketex::InvokerKind invokerKind() const override { return InvokerKind::PdfLaTeX; }
 
     int callCount() const { return m_index; }
 
@@ -116,7 +116,7 @@ protected:
 
     void SetUp() override
     {
-        m_dir = fs::temp_directory_path() / "maketex_driver_test";
+        m_dir = maketex::test_utils::uniqueTempDir("maketex_driver_test");
         fs::create_directories(m_dir);
         std::ofstream(m_dir / "main.tex")
             << "\\documentclass{article}\\begin{document}Hello\\end{document}";
@@ -199,6 +199,7 @@ TEST_F(BuildDriverTest, rerunSignalTrigersSecondPass)
 TEST_F(BuildDriverTest, maxPassesExceededReturnsFailure)
 {
     std::vector<FakeCall> calls;
+    calls.reserve(4);
     for (int i = 0; i < 4; ++i) {
         calls.push_back(FakeCall {
             .writes = {
@@ -209,7 +210,7 @@ TEST_F(BuildDriverTest, maxPassesExceededReturnsFailure)
     }
     FakeEngine engine(std::move(calls));
 
-    BuildDriver driver(engine, m_db, m_hasher, makeInv(), /*maxPasses=*/4);
+    BuildDriver driver(engine, m_db, m_hasher, makeInv(), { .maxPasses = 4 });
     auto res = driver.run();
 
     EXPECT_FALSE(res.success);
@@ -457,14 +458,14 @@ TEST_F(BuildDriverTest, ignoredPrefixFilesAreNotTracked)
         },
     } });
     BuildDriver firstDriver(firstEngine, m_db, m_hasher, makeInv(),
-        BuildDriver::kDefaultMaxPasses, { }, prefixes);
+        { .ignorePrefixes = prefixes });
     ASSERT_TRUE(firstDriver.run().success);
 
     std::ofstream(texmf / "article.cls") << "% class v2, updated distro\n";
 
     FakeEngine secondEngine({ });
     BuildDriver secondDriver(secondEngine, m_db, m_hasher, makeInv(),
-        BuildDriver::kDefaultMaxPasses, { }, prefixes);
+        { .ignorePrefixes = prefixes });
     auto res = secondDriver.run();
 
     EXPECT_TRUE(res.success);
@@ -498,7 +499,7 @@ TEST_F(BuildDriverTest, toolTriggerChangeDefeatsIncrementalSkip)
         auto biber = factory.hashTriggered(
             "biber", ".bcf", { "true" }, InvokerKind::Biber, /*runOnce=*/true);
         BuildDriver driver(engine, m_db, m_hasher, makeInv(),
-            BuildDriver::kDefaultMaxPasses, { biber.get() });
+            { .tools = { biber.get() } });
         ASSERT_TRUE(driver.run().success);
     }
 
@@ -508,7 +509,7 @@ TEST_F(BuildDriverTest, toolTriggerChangeDefeatsIncrementalSkip)
         auto biber = factory.hashTriggered(
             "biber", ".bcf", { "true" }, InvokerKind::Biber, /*runOnce=*/true);
         BuildDriver driver(engine, m_db, m_hasher, makeInv(),
-            BuildDriver::kDefaultMaxPasses, { biber.get() });
+            { .tools = { biber.get() } });
         auto res = driver.run();
         EXPECT_TRUE(res.success);
         EXPECT_EQ(res.passes, 0);
@@ -522,7 +523,7 @@ TEST_F(BuildDriverTest, toolTriggerChangeDefeatsIncrementalSkip)
         auto biber = factory.hashTriggered(
             "biber", ".bcf", { "true" }, InvokerKind::Biber, /*runOnce=*/true);
         BuildDriver driver(engine, m_db, m_hasher, makeInv(),
-            BuildDriver::kDefaultMaxPasses, { biber.get() });
+            { .tools = { biber.get() } });
         auto res = driver.run();
         EXPECT_TRUE(res.success);
         EXPECT_GE(res.passes, 1);
@@ -556,7 +557,7 @@ TEST_F(BuildDriverTest, hashTriggeredToolFiresOnBcfChange)
     auto biber = factory.hashTriggered(
         "biber", ".bcf", { "true" }, InvokerKind::Biber, /*runOnce=*/true);
     BuildDriver driver(engine, m_db, m_hasher, makeInv(),
-        BuildDriver::kDefaultMaxPasses, { biber.get() });
+        { .tools = { biber.get() } });
     auto res = driver.run();
 
     EXPECT_TRUE(res.success);
@@ -588,9 +589,211 @@ TEST_F(BuildDriverTest, bibtexTriggeredByAuxBibdata)
 
     FakeTool bibtexTool;
     BuildDriver driver(engine, m_db, m_hasher, makeInv(),
-        BuildDriver::kDefaultMaxPasses, { &bibtexTool });
+        { .tools = { &bibtexTool } });
     auto res = driver.run();
 
     EXPECT_TRUE(res.success);
     EXPECT_EQ(bibtexTool.callCount(), 1);
+}
+
+TEST_F(BuildDriverTest, observerReceivesPassEvents)
+{
+    using maketex::BuildEvent;
+
+    FakeEngine engine({
+        FakeCall {
+            .writes = {
+                { m_dir / "main.fls", "PWD " + m_dir.string() + "\n" },
+                { m_dir / "main.log", "Rerun to get cross-references right\n" },
+            },
+        },
+        FakeCall {
+            .writes = {
+                { m_dir / "main.fls", "PWD " + m_dir.string() + "\n" },
+                { m_dir / "main.log", "This is pdfTeX\n" },
+            },
+        },
+    });
+
+    std::vector<BuildEvent> events;
+    BuildDriver driver(engine, m_db, m_hasher, makeInv(),
+        { .observer = [&](const BuildEvent& e) { events.push_back(e); } });
+    auto res = driver.run();
+
+    ASSERT_TRUE(res.success);
+    ASSERT_EQ(events.size(), 4u);
+    EXPECT_EQ(events[0].kind, BuildEvent::Kind::PassStarted);
+    EXPECT_EQ(events[0].pass, 1);
+    EXPECT_EQ(events[1].kind, BuildEvent::Kind::PassFinished);
+    EXPECT_EQ(events[1].pass, 1);
+    EXPECT_TRUE(events[1].success);
+    EXPECT_EQ(events[2].kind, BuildEvent::Kind::PassStarted);
+    EXPECT_EQ(events[2].pass, 2);
+    EXPECT_EQ(events[3].kind, BuildEvent::Kind::PassFinished);
+    EXPECT_EQ(events[3].pass, 2);
+}
+
+TEST_F(BuildDriverTest, observerReceivesToolEvents)
+{
+    using maketex::BuildEvent;
+
+    FakeEngine engine({
+        FakeCall {
+            .writes = {
+                { m_dir / "main.fls", "PWD " + m_dir.string() + "\n" },
+                { m_dir / "main.log", "" },
+            },
+        },
+        FakeCall {
+            .writes = {
+                { m_dir / "main.fls", "PWD " + m_dir.string() + "\n" },
+                { m_dir / "main.log", "" },
+            },
+        },
+    });
+
+    FakeTool tool;
+    std::vector<BuildEvent> events;
+    BuildDriver driver(engine, m_db, m_hasher, makeInv(),
+        { .tools = { &tool },
+            .observer = [&](const BuildEvent& e) { events.push_back(e); } });
+    auto res = driver.run();
+
+    ASSERT_TRUE(res.success);
+    auto started = std::find_if(events.begin(), events.end(), [](const auto& e) {
+        return e.kind == BuildEvent::Kind::ToolStarted;
+    });
+    ASSERT_NE(started, events.end());
+    EXPECT_EQ(started->toolName, "fake-tool");
+    auto finished = std::find_if(events.begin(), events.end(), [](const auto& e) {
+        return e.kind == BuildEvent::Kind::ToolFinished;
+    });
+    ASSERT_NE(finished, events.end());
+    EXPECT_TRUE(finished->success);
+}
+
+TEST_F(BuildDriverTest, observerReceivesSkipEvent)
+{
+    using maketex::BuildEvent;
+
+    const fs::path texFile = m_dir / "main.tex";
+    auto flsEntry = "PWD " + m_dir.string() + "\n"
+        + "INPUT " + texFile.string() + "\n";
+
+    FakeEngine firstEngine({ FakeCall {
+        .writes = {
+            { m_dir / "main.fls", flsEntry },
+            { m_dir / "main.log", "This is pdfTeX\n" },
+        },
+    } });
+    BuildDriver firstDriver(firstEngine, m_db, m_hasher, makeInv());
+    ASSERT_TRUE(firstDriver.run().success);
+
+    FakeEngine secondEngine({ });
+    std::vector<BuildEvent> events;
+    BuildDriver secondDriver(secondEngine, m_db, m_hasher, makeInv(),
+        { .observer = [&](const BuildEvent& e) { events.push_back(e); } });
+    auto res = secondDriver.run();
+
+    EXPECT_TRUE(res.success);
+    ASSERT_EQ(events.size(), 1u);
+    EXPECT_EQ(events[0].kind, BuildEvent::Kind::SkippedUpToDate);
+}
+
+// ── cache portability: the moved-checkout scenario ───────────────────────────
+
+TEST_F(BuildDriverTest, incrementalSkipSurvivesDirectoryMove)
+{
+    // Build in a/, persist to a file-backed db inside it, rename a/ to b/
+    // (what a restored CI cache at a different path looks like), and rebuild
+    // — the second run must be a no-op.
+    const fs::path a = m_dir / "a";
+    fs::create_directories(a);
+    std::ofstream(a / "main.tex") << "content";
+
+    auto makeDb = [](const fs::path& root) {
+        return StateDatabase(
+            std::make_unique<SQLite::Database>((root / ".maketex.db").string(),
+                SQLite::OPEN_READWRITE | SQLite::OPEN_CREATE),
+            { .projectRoot = root, .fingerprint = "fp" });
+    };
+
+    {
+        FakeEngine engine({ FakeCall {
+            .writes = {
+                { a / "main.fls",
+                    "PWD " + a.string() + "\nINPUT ./main.tex\nOUTPUT ./main.pdf\n" },
+                { a / "main.log", "This is pdfTeX\n" },
+                { a / "main.pdf", "pdf" },
+            },
+        } });
+        auto db = makeDb(a);
+        BuildDriver driver(engine, db, m_hasher,
+            EngineInvocation { .texFile = a / "main.tex", .outputDir = a });
+        auto res = driver.run();
+        ASSERT_TRUE(res.success);
+        ASSERT_EQ(res.passes, 1);
+    }
+
+    const fs::path b = m_dir / "b";
+    fs::rename(a, b);
+
+    FakeEngine engine({ }); // a rebuild attempt would throw out_of_range
+    auto db = makeDb(b);
+    BuildDriver driver(engine, db, m_hasher,
+        EngineInvocation { .texFile = b / "main.tex", .outputDir = b });
+    auto res = driver.run();
+
+    EXPECT_TRUE(res.success);
+    EXPECT_EQ(res.passes, 0); // skipped up to date — no engine call
+    EXPECT_EQ(engine.callCount(), 0);
+}
+
+TEST_F(BuildDriverTest, movedCheckoutWithChangedSourceRebuilds)
+{
+    const fs::path a = m_dir / "a";
+    fs::create_directories(a);
+    std::ofstream(a / "main.tex") << "content";
+
+    auto makeDb = [](const fs::path& root) {
+        return StateDatabase(
+            std::make_unique<SQLite::Database>((root / ".maketex.db").string(),
+                SQLite::OPEN_READWRITE | SQLite::OPEN_CREATE),
+            { .projectRoot = root, .fingerprint = "fp" });
+    };
+
+    {
+        FakeEngine engine({ FakeCall {
+            .writes = {
+                { a / "main.fls",
+                    "PWD " + a.string() + "\nINPUT ./main.tex\nOUTPUT ./main.pdf\n" },
+                { a / "main.log", "This is pdfTeX\n" },
+                { a / "main.pdf", "pdf" },
+            },
+        } });
+        auto db = makeDb(a);
+        BuildDriver driver(engine, db, m_hasher,
+            EngineInvocation { .texFile = a / "main.tex", .outputDir = a });
+        ASSERT_TRUE(driver.run().success);
+    }
+
+    const fs::path b = m_dir / "b";
+    fs::rename(a, b);
+    std::ofstream(b / "main.tex") << "different content";
+
+    FakeEngine engine({ FakeCall {
+        .writes = {
+            { b / "main.fls",
+                "PWD " + b.string() + "\nINPUT ./main.tex\nOUTPUT ./main.pdf\n" },
+            { b / "main.log", "This is pdfTeX\n" },
+            { b / "main.pdf", "pdf2" },
+        },
+    } });
+    auto db = makeDb(b);
+    BuildDriver driver(engine, db, m_hasher,
+        EngineInvocation { .texFile = b / "main.tex", .outputDir = b });
+    auto res = driver.run();
+
+    EXPECT_TRUE(res.success);
+    EXPECT_EQ(res.passes, 1); // content change must defeat the skip
 }

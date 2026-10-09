@@ -1,0 +1,28 @@
+% Fixture: failures/warn-package-warning
+%
+% Purpose: verify that a multi-line "Package X Warning:" block is folded into
+% a single diagnostic with category "package".
+%
+% Expected maketex behaviour:
+%   - Engine: pdflatex
+%   - Exit: 0 (PDF produced)
+%
+% Log warning (shape; hyperref folds continuation lines prefixed "(hyperref)"):
+%   Package hyperref Warning: Token not allowed in a PDF string (Unicode):
+%   (hyperref)                removing `\\'
+%
+% The error surfacing system should extract:
+%   - type:     warning
+%   - category: package
+%   - message:  one folded line starting "Package hyperref: Token not allowed..."
+
+\documentclass{article}
+\usepackage{hyperref}
+
+\begin{document}
+
+\section{A heading with a forced break \texorpdfstring{x}{x} \\ tail}
+
+Body.
+
+\end{document}

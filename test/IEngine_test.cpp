@@ -15,7 +15,7 @@ struct MockEngine : public IEngine {
     }
 
     std::string_view name() const override { return "mock"; }
-    InvokerKind invokerKind() const override { return InvokerKind::PdfLatex; }
+    InvokerKind invokerKind() const override { return InvokerKind::PdfLaTeX; }
 };
 
 } // namespace

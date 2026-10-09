@@ -1,8 +1,11 @@
 #pragma once
 
+#include "maketex/PathCodec.h"
+
 #include <SQLiteCpp/SQLiteCpp.h>
 #include <array>
 #include <cstdint>
+#include <filesystem>
 #include <memory>
 #include <optional>
 #include <string>
@@ -34,13 +37,36 @@ struct RuleRecord {
     bool succeeded;
 };
 
+// Compatibility and portability settings for a state database.
+struct StateDbConfig {
+    // Paths under this root are stored relative, so a cache restored at a
+    // different checkout path still hits. Empty stores paths verbatim.
+    std::filesystem::path projectRoot;
+
+    // Build-options fingerprint (engine, tools, flags). A stored database
+    // whose fingerprint differs is wiped — its hashes were recorded under
+    // different build semantics. Empty skips the comparison.
+    std::string fingerprint;
+};
+
 // Wraps all SQL operations against the maketex state database.
 // Takes ownership of the SQLite::Database — pass an in-memory database in
 // tests, a file-backed one in production.
 class StateDatabase {
 public:
-    // Applies the schema to db (idempotent — uses CREATE TABLE IF NOT EXISTS).
-    explicit StateDatabase(std::unique_ptr<SQLite::Database> db);
+    // Bumped when the schema or the path encoding changes incompatibly;
+    // databases written by other versions are wiped on open.
+    static constexpr int kSchemaVersion = 2;
+
+    // Applies the schema to db (idempotent — uses CREATE TABLE IF NOT
+    // EXISTS), then drops all stored state when the database is from an
+    // incompatible schema version or carries a different fingerprint.
+    explicit StateDatabase(std::unique_ptr<SQLite::Database> db,
+        const StateDbConfig& config = { });
+
+    // True when incompatible prior state was dropped during construction —
+    // the caller may want to tell the user why this build runs cold.
+    bool wasReset() const { return m_wasReset; }
 
     // File state ──────────────────────────────────────────────────────────────
 
@@ -70,8 +96,13 @@ public:
 
 private:
     void applySchema();
+    void resetIncompatibleState(const std::string& fingerprint);
+    std::optional<std::string> getMeta(const std::string& key) const;
+    void setMeta(const std::string& key, const std::string& value);
 
     std::unique_ptr<SQLite::Database> m_db;
+    PathCodec m_codec;
+    bool m_wasReset = false;
 };
 
 } // namespace maketex

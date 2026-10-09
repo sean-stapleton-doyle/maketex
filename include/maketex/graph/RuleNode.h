@@ -36,7 +36,8 @@ public:
     // Persists the current input hashes and updates the rule record.
     // Call after every execution, whether or not it succeeded.
     // Input nodes must have been refresh()ed before this call.
-    void markRan(StateDatabase& db, bool succeeded, const std::string& command) const;
+    // Not const: it writes the rule record and input hashes to the database.
+    void markRan(StateDatabase& db, bool succeeded, const std::string& command);
 
 private:
     std::string m_name;

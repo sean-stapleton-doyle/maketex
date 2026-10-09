@@ -30,6 +30,14 @@ public:
         IFileHasher& hasher,
         bool runOnce = false);
 
+    // Reference member makes this type non-copyable and non-movable; spell it
+    // out (C.21). Tools are held by std::unique_ptr, so neither is needed.
+    HashTriggeredTool(const HashTriggeredTool&) = delete;
+    HashTriggeredTool& operator=(const HashTriggeredTool&) = delete;
+    HashTriggeredTool(HashTriggeredTool&&) = delete;
+    HashTriggeredTool& operator=(HashTriggeredTool&&) = delete;
+    ~HashTriggeredTool() override = default;
+
     std::string_view name() const override { return m_name; }
     InvokerKind invokerKind() const override { return m_kind; }
     std::vector<std::string> buildArgs(const ToolInvocation& inv) const override;
@@ -44,9 +52,11 @@ private:
     std::string m_name;
     std::string m_triggerExtension;
     std::vector<std::string> m_argvTemplate;
-    InvokerKind m_kind;
+    // ES.20: in-class initializers so the members can never be observed
+    // uninitialized even if a future constructor skips a field.
+    InvokerKind m_kind = InvokerKind::Bibtex;
     IFileHasher& m_hasher;
-    bool m_runOnce;
+    bool m_runOnce = false;
 
     // Trigger state, updated across passes via decide()/onSuccess().
     std::optional<Hash> m_lastHash;

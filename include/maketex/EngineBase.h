@@ -49,6 +49,14 @@ protected:
     // flags and before the tex file.
     void appendExtraOptions(std::vector<std::string>& args) const;
 
+    // Assembles the flag vocabulary shared by the web2c TeX engines
+    // (pdflatex/xelatex/lualatex): -recorder, -interaction=nonstopmode,
+    // -file-line-error, the optional halt/shell-escape/synctex/output-directory
+    // /jobname flags, the user's extra options, and the tex file. Engines that
+    // share this vocabulary call this from buildArgs() with their program name.
+    std::vector<std::string> texEngineArgs(std::string_view program,
+        const EngineInvocation& inv) const;
+
 private:
     EngineArguments m_arguments;
 };

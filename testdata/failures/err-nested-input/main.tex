@@ -1,0 +1,28 @@
+% Fixture: failures/err-nested-input
+%
+% Purpose: verify that an error inside an \input'd file is attributed to that
+% file (chapters/ch1.tex), not the root document.
+%
+% Expected maketex behaviour:
+%   - Engine: pdflatex -halt-on-error -file-line-error
+%   - Exit: 1 (fatal error)
+%
+% Log error (exact text, -file-line-error form):
+%   ./chapters/ch1.tex:9: Undefined control sequence.
+%   l.9 \brokeninchapter
+%
+% The error surfacing system should extract:
+%   - type:    error
+%   - file:    chapters/ch1.tex
+%   - line:    9
+%   - message: Undefined control sequence.
+
+\documentclass{article}
+
+\begin{document}
+
+Body text before the chapter.
+
+\input{chapters/ch1}
+
+\end{document}

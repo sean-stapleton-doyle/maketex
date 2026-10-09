@@ -1,5 +1,6 @@
 #include "maketex/graph/RuleNode.h"
 
+#include <cassert>
 #include <ctime>
 
 namespace maketex {
@@ -11,12 +12,14 @@ RuleNode::RuleNode(std::string name)
 
 void RuleNode::addInput(FileNode* node)
 {
+    assert(node != nullptr);
     if (m_inputSet.insert(node).second)
         m_inputs.push_back(node);
 }
 
 void RuleNode::addOutput(FileNode* node)
 {
+    assert(node != nullptr);
     if (m_outputSet.insert(node).second)
         m_outputs.push_back(node);
 }
@@ -39,7 +42,7 @@ bool RuleNode::isStale(const StateDatabase& db) const
     return false;
 }
 
-void RuleNode::markRan(StateDatabase& db, bool succeeded, const std::string& command) const
+void RuleNode::markRan(StateDatabase& db, bool succeeded, const std::string& command)
 {
     // rules must exist before rule_inputs can reference it (FK constraint).
     db.upsertRule(RuleRecord {

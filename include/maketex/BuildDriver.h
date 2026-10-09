@@ -1,5 +1,6 @@
 #pragma once
 
+#include "maketex/BuildEvent.h"
 #include "maketex/Diagnostic.h"
 #include "maketex/EngineInvocation.h"
 #include "maketex/IEngine.h"
@@ -8,9 +9,11 @@
 #include "maketex/ToolInvocation.h"
 #include "maketex/graph/BuildGraph.h"
 
+#include <expected>
 #include <filesystem>
 #include <optional>
 #include <string>
+#include <system_error>
 #include <unordered_map>
 #include <vector>
 
@@ -44,16 +47,32 @@ class BuildDriver {
 public:
     static constexpr int kDefaultMaxPasses = 8;
 
-    // engine, db, hasher, and tools are non-owning — caller must ensure they
+    // Optional configuration. Kept in a struct so the BuildDriver constructor
+    // stays well under I.23's four-parameter guideline and the two
+    // vector<> fields (tools, ignorePrefixes) can't be silently swapped.
+    struct Config {
+        int maxPasses = kDefaultMaxPasses;
+        std::vector<ITool*> tools;
+        std::vector<std::filesystem::path> ignorePrefixes;
+        BuildObserver observer;
+    };
+
+    // engine, db, and hasher are non-owning — caller must ensure they
     // outlive the driver. Files under any ignorePrefix (e.g. the TeX
     // distribution roots) are excluded from dependency tracking entirely.
+    // observer, when set, receives progress events (see BuildEvent.h) on the
+    // calling thread.
     BuildDriver(IEngine& engine,
         StateDatabase& db,
         IFileHasher& hasher,
         EngineInvocation inv,
-        int maxPasses = kDefaultMaxPasses,
-        std::vector<ITool*> tools = { },
-        std::vector<std::filesystem::path> ignorePrefixes = { });
+        Config config);
+
+    // Convenience overload: collaborators only, default configuration.
+    BuildDriver(IEngine& engine,
+        StateDatabase& db,
+        IFileHasher& hasher,
+        EngineInvocation inv);
 
     DriverResult run();
 
@@ -79,7 +98,7 @@ private:
     // Persists input hashes for every tool that ran this build, using
     // post-convergence file contents, so the next invocation's incremental
     // skip can verify tool inputs (e.g. .bib files) are unchanged.
-    void persistToolRules(FileStateTracker& tracker,
+    std::expected<void, std::error_code> persistToolRules(FileStateTracker& tracker,
         const ToolContext& ctx,
         const std::vector<ITool*>& ranTools);
 
@@ -91,28 +110,37 @@ private:
     void updateGraphFromFls(const std::filesystem::path& flsPath);
 
     // Returns the current hash of every Generated FileNode that exists on disk.
-    std::unordered_map<std::string, Hash> takeSnapshot(FileStateTracker& tracker);
+    // Propagates the first snapshot error (E.7) instead of silently guessing.
+    std::expected<std::unordered_map<std::string, Hash>, std::error_code>
+    takeSnapshot(FileStateTracker& tracker);
 
     // Pre-loop incremental check. Returns true if a prior .fls exists, every
     // recorded rule input still matches its stored hash, and the engine pass
-    // can be skipped entirely. Falls through (returns false) on first build.
+    // can be skipped entirely. Falls through (returns false) on first build
+    // or on any snapshot error (conservative: forces a real build pass, which
+    // re-surfaces the error if it persists).
     bool tryIncrementalSkip(FileStateTracker& tracker);
 
     // Post-pass bookkeeping for a successful engine run: parse the new .fls,
     // refresh rule inputs from disk, and persist input hashes via markRan(true).
-    void persistEnginePass(FileStateTracker& tracker, RuleNode& latexRule);
+    std::expected<void, std::error_code> persistEnginePass(
+        FileStateTracker& tracker, RuleNode& latexRule);
 
     // Iterates m_tools, running any that decide() Run.
     // Stops at the first failure; reports it via outcome.failure.
     ToolPassOutcome runAuxiliaryTools(ToolContext& ctx);
 
+    // Forwards event to m_observer when one is set.
+    void notify(const BuildEvent& event) const;
+
     IEngine& m_engine;
     StateDatabase& m_db;
     IFileHasher& m_hasher;
     EngineInvocation m_inv;
-    int m_maxPasses;
+    const int m_maxPasses;
     std::vector<ITool*> m_tools;
     std::vector<std::filesystem::path> m_ignorePrefixes;
+    BuildObserver m_observer;
 
     BuildGraph m_graph;
 };

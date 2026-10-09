@@ -68,14 +68,18 @@ static int run(int argc, char* argv[])
     if (result.success) {
         std::cout << "maketex: done in " << result.passes
                   << " pass" << (result.passes == 1 ? "" : "es") << "\n";
-        maketex::diagnostics::format(result.diagnostics, std::cerr, verbose);
+        maketex::diagnostics::format(result.diagnostics, std::cerr,
+            verbose ? maketex::diagnostics::Verbosity::Verbose
+                    : maketex::diagnostics::Verbosity::Normal);
         return 0;
     }
 
     std::cerr << "maketex: failed after " << result.passes
               << " pass" << (result.passes == 1 ? "" : "es")
               << ": " << result.lastError << "\n";
-    maketex::diagnostics::format(result.diagnostics, std::cerr, verbose);
+    maketex::diagnostics::format(result.diagnostics, std::cerr,
+        verbose ? maketex::diagnostics::Verbosity::Verbose
+                : maketex::diagnostics::Verbosity::Normal);
 
     return 1;
 }

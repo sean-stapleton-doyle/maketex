@@ -11,11 +11,13 @@
 
 using namespace maketex;
 
+namespace {
+
 // Engine that runs /bin/echo so we can test run() without a LaTeX install.
 class EchoEngine final : public EngineBase {
 public:
     std::string_view name() const override { return "echo"; }
-    InvokerKind invokerKind() const override { return InvokerKind::PdfLatex; }
+    InvokerKind invokerKind() const override { return InvokerKind::PdfLaTeX; }
     std::vector<std::string> buildArgs(const EngineInvocation& inv) const override
     {
         return { "/bin/echo", inv.texFile.string() };
@@ -23,6 +25,8 @@ public:
 };
 
 class EngineBaseTest : public ::testing::Test { };
+
+} // namespace
 
 // ── PdfLatexEngine::buildArgs ─────────────────────────────────────────────────
 
@@ -270,7 +274,7 @@ TEST_F(EngineBaseTest, runPropagatesNonZeroExit)
     public:
         using EngineBase::EngineBase;
         std::string_view name() const override { return "false"; }
-        InvokerKind invokerKind() const override { return InvokerKind::PdfLatex; }
+        InvokerKind invokerKind() const override { return InvokerKind::PdfLaTeX; }
         std::vector<std::string> buildArgs(const EngineInvocation&) const override
         {
             return { "/usr/bin/false" };
@@ -280,4 +284,37 @@ TEST_F(EngineBaseTest, runPropagatesNonZeroExit)
     FalseEngine engine;
     auto result = engine.run(EngineInvocation { });
     EXPECT_EQ(result.exitCode, 1);
+}
+
+// ── -file-line-error ──────────────────────────────────────────────────────────
+
+TEST_F(EngineBaseTest, allEnginesAddFileLineError)
+{
+    // file:line: error markers are the primary source for per-file error
+    // attribution in DiagnosticExtractor; every engine must emit them.
+    EngineInvocation inv;
+    inv.texFile = "doc.tex";
+    for (auto args : { PdfLatexEngine().buildArgs(inv),
+             XeLatexEngine().buildArgs(inv), LuaLatexEngine().buildArgs(inv) })
+        EXPECT_NE(std::ranges::find(args, "-file-line-error"), args.end());
+}
+
+TEST_F(EngineBaseTest, runSetsLogWidthEnvironment)
+{
+    // EngineBase::run must raise TeX's log line width so file paths and
+    // messages are never wrapped mid-token (see DiagnosticExtractor).
+    class EnvEngine final : public EngineBase {
+    public:
+        std::string_view name() const override { return "env"; }
+        InvokerKind invokerKind() const override { return InvokerKind::PdfLaTeX; }
+        std::vector<std::string> buildArgs(const EngineInvocation&) const override
+        {
+            return { "/bin/sh", "-c", "echo $max_print_line" };
+        }
+    };
+
+    EnvEngine engine;
+    auto result = engine.run(EngineInvocation { });
+    EXPECT_EQ(result.exitCode, 0);
+    EXPECT_EQ(result.stdoutOutput, "10000\n");
 }

@@ -1,11 +1,13 @@
 #pragma once
 
 #include "maketex/BuildDriver.h"
+#include "maketex/BuildEvent.h"
 #include "maketex/EngineArguments.h"
 #include "maketex/ToolFactory.h"
 #include "maketex/engines/EngineFactory.h"
 
 #include <filesystem>
+#include <optional>
 #include <vector>
 
 namespace maketex {
@@ -23,7 +25,7 @@ std::vector<std::filesystem::path> texSystemRoots();
 struct BuildOptions {
     std::filesystem::path texFile; // absolute path to the root .tex file
 
-    EngineKind engine = EngineKind::PdfLatex;
+    EngineKind engine = EngineKind::PdfLaTeX;
     EngineArguments engineArguments;
 
     // Auxiliary tools eligible to run between engine passes, in this order.
@@ -36,13 +38,33 @@ struct BuildOptions {
     };
 
     // Where the engine writes its outputs and where .maketex.db lives.
-    // Empty means the tex file's directory.
+    // Empty means "<texdir>/.maketex" (created on demand by runBuild); the
+    // final PDF (and .synctex.gz) is then published back beside the tex
+    // file. An explicit directory keeps everything inside it.
     std::filesystem::path outputDir;
+
+    static constexpr std::string_view kDefaultOutputDirName = ".maketex";
+
+    // outputDir, or the hidden default next to texFile when unset.
+    std::filesystem::path resolvedOutputDir() const
+    {
+        return outputDir.empty()
+            ? texFile.parent_path() / kDefaultOutputDirName
+            : outputDir;
+    }
+
+    // True when building into the hidden default — the mode that publishes
+    // final artifacts back beside the tex file.
+    bool usesDefaultOutputDir() const { return outputDir.empty(); }
 
     bool haltOnError = true;
     bool shellEscape = false;
     bool synctex = false;
     int maxPasses = BuildDriver::kDefaultMaxPasses;
+
+    // Receives progress events (pass/tool start and finish) on the calling
+    // thread when set. See BuildEvent.h.
+    BuildObserver observer;
 };
 
 // Assembles the full build — engine, state database, hasher, and the default
@@ -51,5 +73,31 @@ struct BuildOptions {
 // installed, database errors) propagate as exceptions from the underlying
 // components.
 DriverResult runBuild(const BuildOptions& options);
+
+// Copies jobName.pdf (and jobName.synctex.gz when present) from outDir to
+// destDir via a temp file + rename, so readers never observe a half-written
+// PDF. Returns the successfully published paths; no-op when the directories
+// are the same. Publish failures (e.g. read-only destination) are skipped
+// rather than thrown — the build has already succeeded; a missing artifact
+// is reflected by its absence from the returned vector. Never throws.
+std::vector<std::filesystem::path> publishArtifacts(
+    const std::filesystem::path& outDir,
+    const std::filesystem::path& destDir,
+    const std::string& jobName);
+
+// Classification of the last build's files, read from the engine's -recorder
+// .fls output. Paths are absolute and exclude the TeX distribution roots.
+struct BuildFileSets {
+    // Read but never written by the engine: the document's true sources.
+    std::vector<std::filesystem::path> sources;
+    // Written by the engine, including read-back files like .aux.
+    std::vector<std::filesystem::path> generated;
+};
+
+// Scans the .fls left by the last build of options.texFile. Returns nullopt
+// when no .fls exists (never built, or cleaned) or it cannot be parsed.
+// Consumers: the CLI's watch mode (sources = the set to watch) and clean
+// (generated = engine outputs to remove).
+std::optional<BuildFileSets> scanBuildFiles(const BuildOptions& options);
 
 } // namespace maketex

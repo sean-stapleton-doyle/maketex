@@ -8,6 +8,7 @@
 #include <signal.h>
 #include <spawn.h>
 #include <stdexcept>
+#include <string_view>
 #include <sys/wait.h>
 #include <system_error>
 #include <unistd.h>
@@ -34,7 +35,8 @@ namespace {
 } // namespace
 
 Process::Process(std::span<const std::string> argv,
-    const std::filesystem::path& workingDir)
+    const std::filesystem::path& workingDir,
+    std::span<const std::pair<std::string, std::string>> extraEnv)
 {
     if (argv.empty())
         throw std::invalid_argument("Process: argv must not be empty");
@@ -70,8 +72,37 @@ Process::Process(std::span<const std::string> argv,
         cargv.push_back(const_cast<char*>(s.c_str())); // NOLINT — POSIX API
     cargv.push_back(nullptr);
 
+    // Inherited environment with extraEnv overrides appended. envStorage owns
+    // the "KEY=VALUE" strings; cenvp must outlive posix_spawnp only.
+    std::vector<std::string> envStorage;
+    std::vector<char*> cenv;
+    char** cenvp = environ;
+    if (!extraEnv.empty()) {
+        auto overridden = [&](std::string_view entry) {
+            auto eq = entry.find('=');
+            auto name = entry.substr(0, eq);
+            for (const auto& [key, value] : extraEnv)
+                if (key == name)
+                    return true;
+            return false;
+        };
+        for (char** e = environ; *e; ++e)
+            if (!overridden(*e))
+                cenv.push_back(*e);
+        envStorage.reserve(extraEnv.size());
+        for (const auto& [key, value] : extraEnv) {
+            std::string entry = key;
+            entry += '=';
+            entry += value;
+            envStorage.push_back(std::move(entry));
+            cenv.push_back(envStorage.back().data());
+        }
+        cenv.push_back(nullptr);
+        cenvp = cenv.data();
+    }
+
     pid_t pid;
-    int err = ::posix_spawnp(&pid, cargv[0], &fa, nullptr, cargv.data(), environ);
+    int err = ::posix_spawnp(&pid, cargv[0], &fa, nullptr, cargv.data(), cenvp);
     posix_spawn_file_actions_destroy(&fa);
 
     if (err != 0)

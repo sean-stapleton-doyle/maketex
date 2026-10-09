@@ -1,0 +1,5 @@
+---
+# gtest's ASSERT_* macros establish the invariants this check cannot see,
+# so optional dereferences after ASSERT_TRUE(x.has_value()) all misfire.
+InheritParentConfig: true
+Checks: '-bugprone-unchecked-optional-access'
