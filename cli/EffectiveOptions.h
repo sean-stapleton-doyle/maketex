@@ -29,6 +29,8 @@ struct CliExtras {
     bool cleanAll = false;
     bool dryRun = false;
     bool noTui = false;
+    // Run tlmgr for missing packages and rebuild (opt-in).
+    bool installMissing = false;
 };
 
 struct EffectiveOptions {

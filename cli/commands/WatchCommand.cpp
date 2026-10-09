@@ -1,6 +1,7 @@
 #include "commands/WatchCommand.h"
 
 #include "PackageHints.h"
+#include "PackageInstaller.h"
 #include "PathUtil.h"
 
 #include "FileWatcher.h"
@@ -16,6 +17,7 @@
 #include <functional>
 #include <iostream>
 #include <mutex>
+#include <sstream>
 #include <stop_token>
 #include <thread>
 #include <utility>
@@ -60,7 +62,12 @@ namespace {
             auto start = Clock::now();
             BuildResult result;
             try {
-                result = runBuild(build);
+                // Never prompts: the TUI owns the terminal. Installs happen
+                // only into a user-writable tree; otherwise a note says why.
+                std::ostringstream installLog;
+                result = options.extras.installMissing
+                    ? buildInstallingMissing(build, /*interactive=*/false, installLog)
+                    : runBuild(build);
                 addInstallHints(result.diagnostics);
                 // Don't pay for the failing pdflatex attempt on every save.
                 if (result.retriedEngine)

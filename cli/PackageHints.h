@@ -42,6 +42,10 @@ PackageLookup tlmgrLookup(std::filesystem::path cacheDir);
 // The per-user cache directory ($XDG_CACHE_HOME/maketex, ~/.cache/maketex).
 std::filesystem::path userCacheDir();
 
+// Whether d reports a missing package, class, or program that a TeX
+// distribution could provide — not the user's own \input file.
+bool isInstallable(const Diagnostic& d);
+
 // Sets `hint` on every missing-file / missing-tool diagnostic that names
 // what is missing and has no hint yet. Detects the distribution and looks
 // packages up only when such a diagnostic exists.

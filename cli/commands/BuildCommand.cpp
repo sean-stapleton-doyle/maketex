@@ -1,6 +1,7 @@
 #include "commands/BuildCommand.h"
 
 #include "PackageHints.h"
+#include "PackageInstaller.h"
 #include "PathUtil.h"
 #include "render/GithubReport.h"
 #include "render/InlineReport.h"
@@ -14,6 +15,8 @@
 #include <algorithm>
 #include <exception>
 #include <iostream>
+
+#include <unistd.h>
 
 namespace maketex::cli {
 
@@ -65,7 +68,15 @@ int runBuildCommand(const EffectiveOptions& options)
     BuildResult result;
     bool environmentError = false;
     try {
-        result = runBuild(options.build);
+        if (options.extras.installMissing) {
+            // Prompting for a sudo password is only fair on a terminal and
+            // with human output (machine formats own stdout).
+            bool interactive = options.extras.format == OutputFormat::Human
+                && ::isatty(STDIN_FILENO) && ::isatty(STDERR_FILENO);
+            result = buildInstallingMissing(options.build, interactive, std::cerr);
+        } else {
+            result = runBuild(options.build);
+        }
     } catch (const std::exception& e) {
         // Database or filesystem trouble: still one report in the requested
         // format (JSON consumers rely on exactly one document on stdout).

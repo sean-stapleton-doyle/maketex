@@ -155,7 +155,7 @@ std::expected<Config, std::string> parseConfig(std::string_view toml,
 
     warnUnknownKeys(table, "",
         { "main", "engine", "output-dir", "tools", "shell-escape", "synctex",
-            "halt-on-error", "max-passes", "timeout", "engine-args", "watch", "clean" },
+            "halt-on-error", "max-passes", "timeout", "install-missing", "engine-args", "watch", "clean" },
         sourceFile, config.warnings);
 
     if (auto main = getScalar<std::string>(table, "main", "string", errors))
@@ -188,6 +188,7 @@ std::expected<Config, std::string> parseConfig(std::string_view toml,
     config.shellEscape = getScalar<bool>(table, "shell-escape", "boolean", errors);
     config.synctex = getScalar<bool>(table, "synctex", "boolean", errors);
     config.haltOnError = getScalar<bool>(table, "halt-on-error", "boolean", errors);
+    config.installMissing = getScalar<bool>(table, "install-missing", "boolean", errors);
 
     // Positive and small enough for an int: a huge TOML integer must not
     // wrap into a tiny one.

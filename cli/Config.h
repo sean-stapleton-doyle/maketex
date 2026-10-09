@@ -27,6 +27,7 @@ struct Config {
     std::optional<bool> haltOnError;
     std::optional<int> maxPasses;
     std::optional<int> timeoutSeconds;
+    std::optional<bool> installMissing;
 
     std::optional<int> watchIntervalMs;
     std::vector<std::filesystem::path> watchExtraPaths;

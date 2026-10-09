@@ -8,6 +8,7 @@ work that is already up to date, and reports diagnostics cleanly.
 maketex [build] [file.tex] [options]    # compile once (default command)
 maketex watch  [file.tex] [options]     # rebuild whenever a source changes
 maketex clean  [file.tex] [options]     # remove generated files
+maketex doctor [file.tex] [options]     # check the TeX installation
 maketex --help | --version
 ```
 
@@ -102,6 +103,20 @@ On TeX Live (including MacTeX and BasicTeX), maketex asks
 answer in `~/.cache/maketex/`. Debian, Fedora, and MiKTeX installs get
 `apt`, `dnf`, and `miktex` commands instead.
 
+To have maketex install them for you, pass `--install-missing` (or set
+`install-missing = true`). After a build fails for a missing package or
+tool, maketex runs `tlmgr install` and builds again, round after round,
+because TeX stops at the first missing package. This works on TeX Live
+only. How `tlmgr` runs depends on who owns the TeX tree:
+
+- If your user can write to the tree, maketex runs `tlmgr` directly.
+- If root owns the tree (the MacTeX and BasicTeX default), a plain
+  `maketex` build on a terminal runs `sudo tlmgr`, which asks for your
+  password. In `watch`, CI, or with `--format=json`/`github`, maketex never
+  prompts; it prints the command to run instead. To make installs work
+  everywhere without a password, take ownership of the tree once:
+  `sudo chown -R $(whoami) /usr/local/texlive/<year>`.
+
 Documents that run external programs (minted, svg) need `--shell-escape`.
 maketex never turns it on by itself, because it lets the document run
 arbitrary commands; the error tells you to add the flag.
@@ -121,6 +136,7 @@ arbitrary commands; the error tells you to add the flag.
 | `--halt-on-error` / `--no-halt-on-error` | stop at the first TeX error (default on) |
 | `--max-passes <n>` | give up if not converged after n passes (default 8) |
 | `--timeout <seconds>` | stop any engine or tool run that takes longer (default: no limit) |
+| `--install-missing` / `--no-install-missing` | install missing packages and tools with `tlmgr`, then rebuild (default off) |
 | `-v`, `--verbose` | show raw log context under each diagnostic |
 | `--plain` | plain text output even on a terminal |
 | `--config <path>` / `--no-config` | use exactly this config file / ignore config files |
@@ -183,6 +199,26 @@ per build instead — useful for CI or running inside another tool.
 Watch-only options: `--interval-ms <n>` sets the polling interval
 (default 300); the config's `[watch] extra-paths` adds files or directories
 to the watch set.
+
+## Checking the installation
+
+```sh
+maketex doctor               # engines, tools, and whether installs can run
+maketex doctor thesis.tex    # also the packages and programs thesis.tex needs
+maketex doctor thesis.tex --install-missing
+```
+
+`doctor` lists your TeX distribution, each engine and auxiliary tool with
+its version, and whether `--install-missing` can run `tlmgr`. Given a
+document, it also checks the engine the document will use, its class and
+every package it loads, and the programs it needs: biber for biblatex,
+makeindex for an index, pygmentize for minted. It also warns when the
+document needs `--shell-escape`. Every missing item comes with an install
+hint. Tools the document doesn't use are listed for information only.
+
+`doctor` exits `0` when everything needed is installed and `3` otherwise.
+It reads the document's source rather than building it, so it can't see
+packages that a class or another package loads behind the scenes.
 
 ## Cleaning
 

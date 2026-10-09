@@ -5,6 +5,7 @@
 #include <filesystem>
 #include <optional>
 #include <string>
+#include <utility>
 #include <vector>
 
 namespace maketex {
@@ -47,5 +48,22 @@ struct EngineChoice {
 // (xeCJK, mathspec, …) → xelatex; other Unicode-engine packages (fontspec,
 // unicode-math, polyglossia) → lualatex; otherwise pdflatex.
 EngineChoice detectEngine(const std::filesystem::path& texFile);
+
+// What building a document will take, read from its source (the root file
+// plus the files it \input/\includes directly). Static analysis: it sees what
+// the source says, not what packages load behind the scenes.
+struct DocumentRequirements {
+    std::string documentClass; // e.g. "article"; empty if not found
+    std::vector<std::string> packages; // \usepackage / \RequirePackage names
+    EngineChoice engine;
+    // Programs the build will run besides the engine, each with the reason:
+    // { "biber", "loads biblatex" }, { "pygmentize", "loads minted" }, …
+    std::vector<std::pair<std::string, std::string>> programs;
+    // The document runs external programs (minted, svg, …) and needs
+    // --shell-escape.
+    bool needsShellEscape = false;
+};
+
+DocumentRequirements analyzeRequirements(const std::filesystem::path& texFile);
 
 } // namespace maketex

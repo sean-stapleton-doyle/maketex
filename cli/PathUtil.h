@@ -1,8 +1,11 @@
 #pragma once
 
+#include <cstdlib>
 #include <filesystem>
 #include <optional>
 #include <string>
+#include <string_view>
+#include <unistd.h>
 
 namespace maketex::cli {
 
@@ -22,6 +25,28 @@ inline std::optional<std::filesystem::path> relativeInside(
 inline bool isInside(const std::filesystem::path& p, const std::filesystem::path& dir)
 {
     return relativeInside(p, dir).has_value();
+}
+
+// The executable `name` resolves to on PATH, or nullopt.
+inline std::optional<std::filesystem::path> findProgram(const std::string& name)
+{
+    const char* path = std::getenv("PATH");
+    if (!path)
+        return std::nullopt;
+    std::string_view rest(path);
+    while (true) {
+        auto colon = rest.find(':');
+        auto dir = rest.substr(0, colon);
+        if (!dir.empty()) {
+            auto candidate = std::filesystem::path(dir) / name;
+            if (::access(candidate.c_str(), X_OK) == 0
+                && !std::filesystem::is_directory(candidate))
+                return candidate;
+        }
+        if (colon == std::string_view::npos)
+            return std::nullopt;
+        rest.remove_prefix(colon + 1);
+    }
 }
 
 // "1 pass", "3 passes".
