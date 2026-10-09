@@ -365,10 +365,14 @@ BuildDriver::ToolPassOutcome BuildDriver::runStaleTools(
             if (*after)
                 producedOutputs.emplace_back(key(outputs[i]), **after);
         }
-        recordRule(m_db, ruleName, true, std::string(tool->name()));
-        m_db.setRuleInputs(ruleName, { inputs->begin(), inputs->end() });
-        recordRule(m_db, ruleName + "#outputs", true, std::string(tool->name()));
-        m_db.setRuleInputs(ruleName + "#outputs", producedOutputs);
+        auto now = static_cast<int64_t>(std::time(nullptr));
+        const std::string command(tool->name());
+        // Outputs first: if interrupted between the two, the inputs record
+        // still says the tool must run.
+        m_db.recordRun({ .name = ruleName + "#outputs", .command = command, .ran_at = now, .succeeded = true },
+            producedOutputs);
+        m_db.recordRun({ .name = ruleName, .command = command, .ran_at = now, .succeeded = true },
+            { inputs->begin(), inputs->end() });
 
         outcome.ranAny = true;
         outcome.outputsChanged = outcome.outputsChanged || changed;

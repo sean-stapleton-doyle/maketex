@@ -12,6 +12,11 @@
 
 #include <SQLiteCpp/SQLiteCpp.h>
 
+#include <cerrno>
+#include <fcntl.h>
+#include <sys/file.h>
+#include <unistd.h>
+
 #include <algorithm>
 #include <array>
 #include <format>
@@ -140,6 +145,29 @@ namespace {
 
 namespace {
 
+    // An exclusive flock(2) on a lock file, released on destruction. Lock
+    // trouble (an unwritable directory) is not fatal: the build proceeds
+    // unlocked, as before locks existed.
+    class BuildLock {
+    public:
+        explicit BuildLock(const fs::path& path)
+            : m_fd(::open(path.c_str(), O_RDWR | O_CREAT | O_CLOEXEC, 0644))
+        {
+            if (m_fd >= 0)
+                while (::flock(m_fd, LOCK_EX) != 0 && errno == EINTR) { }
+        }
+        ~BuildLock()
+        {
+            if (m_fd >= 0)
+                ::close(m_fd); // releases the lock
+        }
+        BuildLock(const BuildLock&) = delete;
+        BuildLock& operator=(const BuildLock&) = delete;
+
+    private:
+        int m_fd;
+    };
+
     // \include{chapters/one} makes the engine write chapters/one.aux under
     // -output-directory, and TeX cannot create directories: mirror every
     // source directory that holds .tex files into the output directory.
@@ -231,6 +259,11 @@ namespace {
             .synctex = options.synctex,
         };
 
+        // Held until the build returns: a second maketex building this
+        // document (watch plus a manual run) waits instead of interleaving
+        // writes to the same .aux and PDF.
+        BuildLock lock(buildLockPath(outDir, inv.resolvedJobName()));
+
         auto db = std::make_unique<SQLite::Database>(
             dbPath.string(), SQLite::OPEN_READWRITE | SQLite::OPEN_CREATE);
         StateDatabase stateDb(std::move(db),
@@ -281,6 +314,16 @@ namespace {
     }
 
 } // namespace
+
+std::string jobNameFor(const BuildOptions& options)
+{
+    return splitJobName(options.engineArguments).second.value_or(options.texFile.stem().string());
+}
+
+fs::path buildLockPath(const fs::path& outDir, const std::string& jobName)
+{
+    return outDir / ("." + jobName + ".lock");
+}
 
 EngineChoice chooseEngine(const BuildOptions& options)
 {
@@ -363,10 +406,10 @@ std::vector<fs::path> publishArtifacts(const fs::path& outDir,
         }
         // Copy to a sibling temp file first: rename within destDir is atomic
         // on POSIX, so a viewer refreshing mid-publish sees old or new,
-        // never a torn file. The temp name is fixed — concurrent builds of
-        // the same document already race on the outputs themselves.
+        // never a torn file. The temp name carries the pid so two processes
+        // publishing at once never write the same temp file.
         fs::path tmp = dest;
-        tmp += ".maketex-tmp";
+        tmp += ".maketex-tmp-" + std::to_string(::getpid());
         // copy_file returns bool; rename (ec overload) returns void, so check
         // ec explicitly after the call.
         bool copied = fs::copy_file(src, tmp, fs::copy_options::overwrite_existing, ec);

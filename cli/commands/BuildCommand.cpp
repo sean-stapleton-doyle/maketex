@@ -10,6 +10,8 @@
 
 #include "maketex/DiagnosticFormatter.h"
 
+#include <algorithm>
+#include <exception>
 #include <iostream>
 
 namespace maketex::cli {
@@ -60,8 +62,25 @@ namespace {
 
 int runBuildCommand(const EffectiveOptions& options)
 {
-    auto result = runBuild(options.build);
+    BuildResult result;
+    bool environmentError = false;
+    try {
+        result = runBuild(options.build);
+    } catch (const std::exception& e) {
+        // Database or filesystem trouble: still one report in the requested
+        // format (JSON consumers rely on exactly one document on stdout).
+        environmentError = true;
+        result.lastError = e.what();
+        result.diagnostics.push_back(Diagnostic {
+            .severity = Diagnostic::Severity::Error,
+            .message = e.what(),
+            .category = "environment",
+        });
+    }
     addInstallHints(result.diagnostics);
+    environmentError = environmentError
+        || std::ranges::any_of(result.diagnostics,
+            [](const Diagnostic& d) { return d.category == "missing-tool"; });
 
     switch (options.extras.format) {
     case OutputFormat::Json:
@@ -77,7 +96,9 @@ int runBuildCommand(const EffectiveOptions& options)
         break;
     }
 
-    return result.success ? 0 : 1;
+    if (result.success)
+        return kExitSuccess;
+    return environmentError ? kExitEnvironment : kExitBuildFailed;
 }
 
 } // namespace maketex::cli

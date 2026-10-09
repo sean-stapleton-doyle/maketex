@@ -101,7 +101,23 @@ public:
     std::vector<std::pair<std::string, Hash>> getRuleInputs(
         const std::string& ruleName) const;
 
+    // Records a run — the rule's outcome and the inputs it consumed — in one
+    // transaction, so a crash can never pair "succeeded" with another run's
+    // inputs.
+    void recordRun(const RuleRecord& rule,
+        const std::vector<std::pair<std::string, Hash>>& inputs);
+
+    // Jobs (documents) that have state here, from their fingerprints.
+    std::vector<std::string> jobs() const;
+
+    // Drops a job's rule records and fingerprint — `clean --all` for one
+    // document in a shared output directory.
+    void forgetJob(const std::string& jobName);
+
 private:
+    void deleteJobRules(const std::string& jobName);
+    void writeRuleInputs(const std::string& ruleName,
+        const std::vector<std::pair<std::string, Hash>>& inputs);
     void applySchema();
     void resetIncompatibleState(const std::string& fingerprint,
         const std::string& jobName);

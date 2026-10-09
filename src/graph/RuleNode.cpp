@@ -44,21 +44,19 @@ bool RuleNode::isStale(const StateDatabase& db) const
 
 void RuleNode::markRan(StateDatabase& db, bool succeeded, const std::string& command)
 {
-    // rules must exist before rule_inputs can reference it (FK constraint).
-    db.upsertRule(RuleRecord {
-        .name = m_name,
-        .command = command,
-        .ran_at = static_cast<int64_t>(std::time(nullptr)),
-        .succeeded = succeeded,
-    });
-
     std::vector<std::pair<std::string, Hash>> snapshots;
     snapshots.reserve(m_inputs.size());
     for (const auto& node : m_inputs) {
         if (node->state().exists)
             snapshots.emplace_back(node->path().string(), node->state().hash);
     }
-    db.setRuleInputs(m_name, snapshots);
+    db.recordRun(RuleRecord {
+                     .name = m_name,
+                     .command = command,
+                     .ran_at = static_cast<int64_t>(std::time(nullptr)),
+                     .succeeded = succeeded,
+                 },
+        snapshots);
 }
 
 } // namespace maketex

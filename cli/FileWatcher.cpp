@@ -15,18 +15,26 @@ FileWatcher::FileWatcher(std::chrono::milliseconds pollInterval,
 {
 }
 
-void FileWatcher::setWatchSet(std::vector<fs::path> paths)
+void FileWatcher::setWatchSet(std::vector<fs::path> paths, Exclusion exclude)
 {
     std::lock_guard lock(m_mutex);
     m_watchSet = std::move(paths);
+    m_exclude = std::move(exclude);
+}
+
+std::vector<FileWatcher::Entry> FileWatcher::captureBaseline() const
+{
+    return snapshot(expandedWatchSet());
 }
 
 std::vector<fs::path> FileWatcher::expandedWatchSet() const
 {
     std::vector<fs::path> roots;
+    Exclusion exclude;
     {
         std::lock_guard lock(m_mutex);
         roots = m_watchSet;
+        exclude = m_exclude;
     }
     std::vector<fs::path> files;
     for (const auto& p : roots) {
@@ -40,6 +48,8 @@ std::vector<fs::path> FileWatcher::expandedWatchSet() const
             files.push_back(p);
         }
     }
+    if (exclude)
+        std::erase_if(files, exclude);
     std::ranges::sort(files);
     files.erase(std::ranges::unique(files).begin(), files.end());
     return files;
@@ -115,10 +125,21 @@ void FileWatcher::nudge()
     m_wake.notify_all();
 }
 
-std::vector<fs::path> FileWatcher::waitForChange(std::stop_token stopToken)
+std::vector<fs::path> FileWatcher::waitForChange(std::stop_token stopToken,
+    const std::optional<std::vector<Entry>>& since)
 {
     auto watched = expandedWatchSet();
     auto baseline = snapshot(watched);
+    if (since) {
+        // Keep the pre-build state of every path that existed in `since`;
+        // paths only the build revealed keep their current state.
+        std::map<fs::path, const Entry*> earlier;
+        for (const auto& entry : *since)
+            earlier[entry.path] = &entry;
+        for (auto& entry : baseline)
+            if (auto it = earlier.find(entry.path); it != earlier.end())
+                entry = *it->second;
+    }
 
     while (true) {
         if (!sleepFor(m_pollInterval, stopToken))

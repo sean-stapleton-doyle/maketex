@@ -18,6 +18,11 @@ namespace {
         ".snm", ".toc", ".vrb", ".xdy"
     };
 
+    // Usually generated, but also written by hand (custom index styles) or
+    // kept on purpose (a .bbl for arXiv): in a directory holding the user's
+    // sources, removed only when the last build recorded writing them.
+    constexpr std::string_view kSometimesAuthoredExtensions[] = { ".bbl", ".ist", ".xdy" };
+
     // Final products, removed only with --all.
     constexpr std::string_view kProductExtensions[] = {
         ".pdf", ".synctex.gz", ".dvi"
@@ -39,12 +44,16 @@ CleanPlan computeCleanPlan(const std::optional<BuildFileSets>& fileSets,
     const std::string& jobName,
     bool all,
     const std::vector<std::string>& extraExtensions,
-    const std::vector<fs::path>& publishedArtifacts)
+    const std::vector<fs::path>& publishedArtifacts,
+    bool userDirectory)
 {
     std::set<fs::path> candidates;
 
-    for (std::string_view ext : kCleanExtensions)
+    for (std::string_view ext : kCleanExtensions) {
+        if (userDirectory && std::ranges::contains(kSometimesAuthoredExtensions, ext))
+            continue;
         candidates.insert(outputDir / (jobName + std::string(ext)));
+    }
     for (const auto& ext : extraExtensions)
         candidates.insert(outputDir / (jobName + ext));
     candidates.insert(outputDir / ("pythontex-files-" + jobName));
@@ -60,6 +69,9 @@ CleanPlan computeCleanPlan(const std::optional<BuildFileSets>& fileSets,
         for (std::string_view ext : kProductExtensions)
             candidates.insert(outputDir / (jobName + std::string(ext)));
         candidates.insert(outputDir / ".maketex.db");
+        candidates.insert(outputDir / ("." + jobName + ".lock"));
+        if (!userDirectory)
+            candidates.insert(outputDir / ".gitignore"); // written by maketex
         for (const auto& p : publishedArtifacts)
             candidates.insert(p);
     }

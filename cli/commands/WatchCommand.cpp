@@ -48,7 +48,14 @@ namespace {
         // for the build to converge.
         build.stopToken = stopToken;
 
+        // The document is watched from the start, so an edit made during
+        // the very first build is not lost either.
+        watcher.setWatchSet({ build.texFile });
+
         while (!stopToken.stop_requested()) {
+            // Snapshot before building: a save that lands mid-build must
+            // trigger the next build, not be absorbed into the baseline.
+            auto preBuild = watcher.captureBaseline();
             auto start = Clock::now();
             BuildResult result;
             try {
@@ -74,27 +81,40 @@ namespace {
             watchSet.insert(watchSet.end(),
                 options.extras.watchExtraPaths.begin(),
                 options.extras.watchExtraPaths.end());
+            // A missing \input file is not in the .fls; watch for it to
+            // appear so creating it triggers the rebuild.
+            for (const auto& d : result.diagnostics) {
+                if (d.category != "missing-file" || d.missingFile.empty())
+                    continue;
+                fs::path missing { d.missingFile };
+                if (missing.extension() == ".sty" || missing.extension() == ".cls")
+                    continue;
+                if (!missing.has_extension())
+                    missing += ".tex";
+                watchSet.push_back(build.texFile.parent_path() / missing);
+            }
 
             // Our own outputs must never retrigger a build: drop anything
-            // under the output directory and the published PDF/SyncTeX
-            // (watch-extra-paths may name a directory that contains both).
+            // under the output directory and the published PDF/SyncTeX.
+            // Applied by the watcher after it expands directories, since
+            // watch-extra-paths may name one that contains them.
             const auto outDir = fs::weakly_canonical(build.resolvedOutputDir());
-            const auto texDir = build.texFile.parent_path();
-            const std::string jobName = build.texFile.stem().string();
-            std::erase_if(watchSet, [&](const fs::path& p) {
+            const auto texDir = fs::weakly_canonical(build.texFile.parent_path());
+            const std::string jobName = jobNameFor(build);
+            const bool published = build.usesDefaultOutputDir();
+            watcher.setWatchSet(watchSet, [=](const fs::path& p) {
                 auto canonical = fs::weakly_canonical(p);
                 auto rel = canonical.lexically_relative(outDir);
                 if (!rel.empty() && *rel.begin() != "..")
                     return true;
-                return build.usesDefaultOutputDir()
+                return published
                     && (canonical == texDir / (jobName + ".pdf")
                         || canonical == texDir / (jobName + ".synctex.gz"));
             });
-            watcher.setWatchSet(watchSet);
 
             callbacks.onResult(std::move(result), duration, watchSet.size());
 
-            auto changed = watcher.waitForChange(stopToken);
+            auto changed = watcher.waitForChange(stopToken, preBuild);
             if (stopToken.stop_requested())
                 return;
             callbacks.onRebuild(std::move(changed));
