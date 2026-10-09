@@ -16,6 +16,9 @@
 
 namespace maketex {
 
+// maketex's version, e.g. "0.1.0".
+std::string_view version();
+
 // TeX distribution roots (TEXMFROOT, system/user caches), resolved via
 // kpsewhich. Files under these are excluded from dependency tracking — the
 // engine reads hundreds of .sty/.cls/font files per pass, and treating them
@@ -135,6 +138,10 @@ struct BuildFileSets {
 // The TeX job name a build of options uses: a -jobname among the engine's
 // extra options, else the tex file's stem. Names the .aux/.log/.pdf files.
 std::string jobNameFor(const BuildOptions& options);
+
+// Where a build of options publishes its PDF and SyncTeX data beside the
+// tex file — empty with an explicit output directory, which keeps them.
+std::vector<std::filesystem::path> publishedArtifactPaths(const BuildOptions& options);
 
 // The lock file a build of jobName holds in outDir for its duration, so
 // two maketex processes building the same document take turns.

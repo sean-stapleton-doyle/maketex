@@ -25,9 +25,11 @@ endif()
 set(CPM_DOWNLOAD_VERSION 0.40.2)
 set(CPM_PATH ${CMAKE_CURRENT_BINARY_DIR}/cmake/CPM_${CPM_DOWNLOAD_VERSION}.cmake)
 if(NOT EXISTS ${CPM_PATH})
+    # Pinned by checksum: this script runs as part of every configure.
     file(DOWNLOAD
         https://github.com/cpm-cmake/CPM.cmake/releases/download/v${CPM_DOWNLOAD_VERSION}/CPM.cmake
-        ${CPM_PATH})
+        ${CPM_PATH}
+        EXPECTED_HASH SHA256=c8cdc32c03816538ce22781ed72964dc864b2a34a310d3b7104812a5ca2d835d)
 endif()
 include(${CPM_PATH})
 
@@ -58,6 +60,23 @@ if(MAKETEX_BUILD_CLI OR MAKETEX_BUILD_TESTS)
     CPMAddPackage("gh:CLIUtils/CLI11@2.5.0")
     CPMAddPackage("gh:marzer/tomlplusplus#v3.4.0")
     CPMAddPackage("gh:nlohmann/json@3.12.0")
+endif()
+
+# ── Shared build settings for maketex's own targets ──────────────────────────
+# Warnings (and optional sanitizers) for every target this project defines,
+# never for dependencies.
+set(MAKETEX_SANITIZE "" CACHE STRING
+    "Sanitizers for maketex's own targets, e.g. address,undefined (GCC/Clang)")
+add_library(maketex_build_settings INTERFACE)
+if(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
+    target_compile_options(maketex_build_settings INTERFACE
+        -Wall -Wextra -Wpedantic -Wshadow -Wconversion)
+    if(MAKETEX_SANITIZE)
+        target_compile_options(maketex_build_settings INTERFACE
+            -fsanitize=${MAKETEX_SANITIZE} -fno-omit-frame-pointer)
+        target_link_options(maketex_build_settings INTERFACE
+            -fsanitize=${MAKETEX_SANITIZE})
+    endif()
 endif()
 
 # ── Core library (shared by executable and tests) ─────────────────────────────
@@ -100,33 +119,20 @@ target_link_libraries(maketex PUBLIC
     SQLiteCpp
 )
 
-# Recorded (informationally) in the state database's meta table.
+# The single source of the version string: maketex::version(), and the
+# state database's informational meta row.
 target_compile_definitions(maketex PRIVATE
     MAKETEX_VERSION="${PROJECT_VERSION}"
 )
 
-target_compile_options(maketex PRIVATE
-    -Wall
-    -Wextra
-    -Wpedantic
-    -Wshadow
-    -Wconversion
-)
+target_link_libraries(maketex PRIVATE $<BUILD_INTERFACE:maketex_build_settings>)
 
 # ── End-to-end harness (not the CLI; see cli/) ───────────────────────────────
 if(MAKETEX_BUILD_HARNESS)
     add_executable(maketex_cli apps/main.cpp)
     set_target_properties(maketex_cli PROPERTIES OUTPUT_NAME maketex-harness)
 
-    target_link_libraries(maketex_cli PRIVATE maketex::maketex)
-
-    target_compile_options(maketex_cli PRIVATE
-        -Wall
-        -Wextra
-        -Wpedantic
-        -Wshadow
-        -Wconversion
-    )
+    target_link_libraries(maketex_cli PRIVATE maketex::maketex maketex_build_settings)
 endif()
 
 # ── Command line interface ────────────────────────────────────────────────────
@@ -168,16 +174,10 @@ if(MAKETEX_BUILD_TESTS)
     target_link_libraries(maketex_tests PRIVATE
         maketex
         maketex_cli_core
+        maketex_build_settings
         GTest::gtest_main
     )
 
-    target_compile_options(maketex_tests PRIVATE
-        -Wall
-        -Wextra
-        -Wpedantic
-        -Wshadow
-        -Wconversion
-    )
 
     include(GoogleTest)
     gtest_discover_tests(maketex_tests)
@@ -186,17 +186,11 @@ if(MAKETEX_BUILD_TESTS)
     add_executable(maketex_integration_tests ${INTEGRATION_SOURCES})
     target_link_libraries(maketex_integration_tests PRIVATE
         maketex
+        maketex_build_settings
         GTest::gtest_main
     )
     target_compile_definitions(maketex_integration_tests PRIVATE
         MAKETEX_TESTDATA_DIR="${CMAKE_SOURCE_DIR}/testdata"
-    )
-    target_compile_options(maketex_integration_tests PRIVATE
-        -Wall
-        -Wextra
-        -Wpedantic
-        -Wshadow
-        -Wconversion
     )
     # Each case runs several real engine passes; allow for a slow TeX.
     gtest_discover_tests(maketex_integration_tests

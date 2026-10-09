@@ -1,6 +1,5 @@
 +++
 title = 'Test Fixture Cases'
-date = '2026-06-11T00:00:00Z'
 +++
 
 # Test Fixture Cases
@@ -17,7 +16,7 @@ column tracks whether the fixture has been created on disk.
 | `toc` | pdflatex | 2 | — | Table of contents as a rerun trigger | Added |
 | `bibtex` | pdflatex | 3 | bibtex | Classic latex → bibtex → latex → latex | Added |
 | `biber` | pdflatex | 3 | biber | biblatex + biber; same pass structure, different tool | Added |
-| `makeindex` | pdflatex | 2 | makeindex | Index generation | Added |
+| `makeindex` | pdflatex | 3 | makeindex | Index generation; the index adds a page, so a third pass settles `\@abspage@last` | Added |
 | `glossaries` | pdflatex | 2 | makeglossaries | Glossary/acronym expansion | Added |
 | `input-include` | pdflatex | 1 | — | `\input` + `\include` across multiple files; dependency tracking | Added |
 | `graphics-raster` | pdflatex | 1 | — | `\includegraphics` with PNG/JPEG; image files tracked as deps | Added |
@@ -31,7 +30,9 @@ column tracks whether the fixture has been created on disk.
 ## Failure Cases
 
 Fixtures under `testdata/failures/` exercise the error-surfacing system.
-Each is expected to produce the documented exit code and error output.
+Each is expected to produce the documented exit code and error output;
+`test/integration/Failures_test.cpp` builds every one with the real engine
+and checks the first diagnostic's category, file, and line.
 
 ### Hard Errors (exit ≠ 0, no PDF)
 
@@ -44,6 +45,8 @@ Each is expected to produce the documented exit code and error output.
 | `failures/err-unclosed-environment` | pdflatex | 1 | `\begin` without `\end` | `! LaTeX Error: \begin{center} on input line 26 ended by \end{document}.` |
 | `failures/err-bibtex-missing-bib` | pdflatex + bibtex | 2 | Missing `.bib` file | `I couldn't open database file no-such-bib-file.bib` |
 | `failures/err-bibtex-bad-entry` | pdflatex + bibtex | 2 | Malformed `.bib` entry | bibtex parse error with `(There was 1 error message)` |
+| `failures/err-nested-input` | pdflatex | 1 | Error inside `\input`'d file | `./chapters/ch1.tex:9: Undefined control sequence.` — attribution must point at the chapter, not the root |
+| `failures/err-missing-font` | xelatex | 1 | fontspec font not found | `Package fontspec Error: The font "No Such Font 2026" cannot be found.` → category `missing-font` |
 
 ### Warnings (exit 0, PDF produced)
 
@@ -52,3 +55,5 @@ Each is expected to produce the documented exit code and error output.
 | `failures/warn-undefined-refs` | pdflatex | 1 | Undefined references | `LaTeX Warning: Reference 'X' on page N undefined` |
 | `failures/warn-duplicate-label` | pdflatex | 2 | Multiply-defined label | `LaTeX Warning: Label 'sec:duplicate' multiply defined.` |
 | `failures/warn-overfull-hbox` | pdflatex | 1 | Overfull `\hbox` | `Overfull \hbox (Xpt too wide) in paragraph at lines N--M` |
+| `failures/warn-undefined-citation` | pdflatex | 1 | Undefined citation | `LaTeX Warning: Citation 'nosuchkey2026' ... undefined` → category `undefined-citation`, key kept in message |
+| `failures/warn-package-warning` | pdflatex | 2 | Multi-line package warning | `Package hyperref Warning: ...` with `(hyperref)` continuations folded into one diagnostic |

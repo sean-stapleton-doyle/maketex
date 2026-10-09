@@ -1,5 +1,7 @@
 #include "CleanPlan.h"
 
+#include "PathUtil.h"
+
 #include <algorithm>
 #include <set>
 #include <string_view>
@@ -27,14 +29,6 @@ namespace {
     constexpr std::string_view kProductExtensions[] = {
         ".pdf", ".synctex.gz", ".dvi"
     };
-
-    bool isInside(const fs::path& p, const fs::path& dir)
-    {
-        auto rel = fs::weakly_canonical(p).lexically_relative(
-            fs::weakly_canonical(dir));
-        return !rel.empty() && rel.native() != "."
-            && !rel.native().starts_with("..");
-    }
 
 } // namespace
 

@@ -46,4 +46,10 @@ private:
     std::filesystem::path m_pwdOverride;
 };
 
+// The parser every consumer of a project's .fls wants: recorded paths
+// re-rooted onto projectDir (the .fls may predate a directory move, as a
+// restored CI cache always does), distribution files left out.
+FlsParser projectFlsParser(const std::filesystem::path& projectDir,
+    const std::vector<std::filesystem::path>& ignorePrefixes);
+
 } // namespace maketex

@@ -27,6 +27,10 @@ docker run \
     bash /mnt/host/scripts/hyde-inside-docker.sh
 
 echo ""
+echo "=== Syncing docs/ into the site ==="
+bash "$REPO/scripts/sync-docs-site.sh"
+
+echo ""
 echo "=== Building Hugo site ==="
 cd "$REPO/docs-site"
 hugo --minify

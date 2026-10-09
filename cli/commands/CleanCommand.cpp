@@ -46,14 +46,9 @@ int runCleanCommand(const EffectiveOptions& options)
     // In default-output mode the PDF/SyncTeX copies published beside the
     // tex file are this build's products too, and a pre-.maketex state
     // database may still sit next to the sources.
-    std::vector<fs::path> published;
-    if (build.usesDefaultOutputDir()) {
-        published = {
-            texDir / (jobName + ".pdf"),
-            texDir / (jobName + ".synctex.gz"),
-            texDir / ".maketex.db",
-        };
-    }
+    std::vector<fs::path> published = publishedArtifactPaths(build);
+    if (build.usesDefaultOutputDir())
+        published.push_back(texDir / ".maketex.db"); // pre-.maketex layout
 
     auto plan = computeCleanPlan(scanBuildFiles(build), build.texFile,
         outputDir, jobName, options.extras.cleanAll,

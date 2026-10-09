@@ -1,5 +1,7 @@
 #include "render/GithubReport.h"
 
+#include "PathUtil.h"
+
 #include <filesystem>
 #include <ostream>
 #include <string>
@@ -72,13 +74,9 @@ namespace {
     // path re-rooted there; fall back to the diagnostic's display path.
     std::string annotationPath(const Diagnostic& d)
     {
-        if (!d.sourcePath.empty()) {
-            std::error_code ec;
-            auto rel = d.sourcePath.lexically_relative(
-                fs::weakly_canonical(fs::current_path(), ec));
-            if (!rel.empty() && *rel.begin() != "..")
-                return rel.generic_string();
-        }
+        if (!d.sourcePath.empty())
+            if (auto rel = relativeInside(d.sourcePath, fs::current_path()))
+                return rel->generic_string();
         return d.file;
     }
 
@@ -103,8 +101,7 @@ void printGithubReport(const DriverResult& result, std::ostream& out)
         out << "::" << escapeData(message) << "\n";
     }
 
-    std::string passes = std::to_string(result.passes) + " pass"
-        + (result.passes == 1 ? "" : "es");
+    std::string passes = passCount(result.passes);
     if (result.upToDate)
         out << "maketex: up to date\n";
     else if (result.success)

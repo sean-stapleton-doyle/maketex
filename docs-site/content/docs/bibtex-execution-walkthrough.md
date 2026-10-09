@@ -1,6 +1,5 @@
 +++
 title = 'BibTeX Build Walkthrough'
-date = '2026-06-11T00:00:00Z'
 +++
 
 # Full Program Execution: BibTeX Build
@@ -264,7 +263,7 @@ beforeSnapshot = { "main.aux": hash_A }
 
 pdflatex runs again with identical argv. This time:
 
-- Reads `main.aux` (has `\citation` entries and `\bibstyle`/`ibdata`)
+- Reads `main.aux` (has `\citation` entries and `\bibstyle`/`\bibdata`)
 - Reads `main.bbl` — it now exists. `\bibliography{refs}` expands to
   `\input{main.bbl}`, so the bibliography section is typeset.
 - Writes updated `main.aux` with resolved citation labels

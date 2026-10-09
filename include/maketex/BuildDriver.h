@@ -17,6 +17,7 @@
 #include <filesystem>
 #include <map>
 #include <optional>
+#include <regex>
 #include <string>
 #include <system_error>
 #include <vector>
@@ -67,6 +68,13 @@ public:
         // Applied to every engine and tool run: a per-process timeout and
         // the token that cancels the build.
         WaitLimits processLimits;
+        // Lines to leave out when hashing files with a given extension, for
+        // content that changes without meaning anything. Default: the
+        // %%CreationDate stamp regenerated EPS figures carry, which would
+        // otherwise defeat convergence detection.
+        std::vector<std::pair<std::string, std::regex>> contentFilters {
+            { "eps", std::regex { R"(^%%CreationDate: )" } },
+        };
     };
 
     // engine, db, and hasher are non-owning — caller must ensure they
@@ -181,6 +189,7 @@ private:
     std::vector<std::filesystem::path> m_ignorePrefixes;
     BuildObserver m_observer;
     WaitLimits m_processLimits;
+    std::vector<std::pair<std::string, std::regex>> m_contentFilters;
 
     BuildGraph m_graph;
 };

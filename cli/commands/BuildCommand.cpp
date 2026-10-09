@@ -1,6 +1,7 @@
 #include "commands/BuildCommand.h"
 
 #include "PackageHints.h"
+#include "PathUtil.h"
 #include "render/GithubReport.h"
 #include "render/InlineReport.h"
 #include "render/JsonReport.h"
@@ -45,8 +46,7 @@ namespace {
         }
         if (!result.engineReason.empty())
             std::cerr << "maketex: engine " << engineLabel(result.engine, result.engineReason) << "\n";
-        std::string passes = std::to_string(result.passes) + " pass"
-            + (result.passes == 1 ? "" : "es");
+        std::string passes = passCount(result.passes);
         if (result.upToDate)
             std::cout << "maketex: up to date\n";
         else if (result.success && result.passes == 0)

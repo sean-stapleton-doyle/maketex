@@ -823,6 +823,35 @@ TEST_F(BuildDriverTest, missingToolBinaryIsADiagnosticNotACrash)
     EXPECT_EQ(res.diagnostics[0].missingFile, "maketex-no-such-tool-xyz");
 }
 
+TEST_F(BuildDriverTest, droppedInputStopsBeingADependency)
+{
+    // The user removes \\input{chapter}: editing chapter.tex afterwards
+    // must not make the document stale.
+    const fs::path chapter = m_dir / "chapter.tex";
+    std::ofstream(chapter) << "old chapter";
+    auto pass = [&](bool withChapter) {
+        auto fls = flsWithTex();
+        if (withChapter)
+            fls += "INPUT " + chapter.string() + "\n";
+        return FakeCall { .writes = { { m_dir / "main.fls", fls }, { m_dir / "main.log", "This is pdfTeX\n" } } };
+    };
+    {
+        FakeEngine engine({ pass(true) });
+        ASSERT_TRUE(BuildDriver(engine, m_db, m_hasher, makeInv()).run().success);
+    }
+    std::ofstream(m_dir / "main.tex") << "\\documentclass{article}\\begin{document}No chapter\\end{document}";
+    {
+        FakeEngine engine({ pass(false) });
+        ASSERT_TRUE(BuildDriver(engine, m_db, m_hasher, makeInv()).run().success);
+    }
+    std::ofstream(chapter) << "edited, but no longer included";
+
+    FakeEngine engine({ });
+    auto res = BuildDriver(engine, m_db, m_hasher, makeInv()).run();
+    EXPECT_TRUE(res.success) << res.lastError;
+    EXPECT_TRUE(res.upToDate);
+}
+
 TEST_F(BuildDriverTest, zeroMaxPassesIsAnError)
 {
     FakeEngine engine({ });

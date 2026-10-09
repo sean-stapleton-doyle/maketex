@@ -1,6 +1,5 @@
 +++
 title = 'maketex in CI'
-date = '2026-06-12T00:00:00Z'
 +++
 
 # maketex in CI
@@ -48,9 +47,10 @@ Properties that make this safe:
   plus a fingerprint of the engine, tool roster, and build flags). A cache
   from an incompatible maketex version or different build options is
   detected on open and reset — you get a clean full build and a `note:`
-  diagnostic, not silent misbehaviour. A different TeX Live version
-  changes the hashes of tracked distribution files and rebuilds for the
-  same reason.
+  diagnostic, not silent misbehaviour. Files inside the TeX distribution
+  are not tracked, so a TeX Live upgrade alone does **not** invalidate the
+  cache: include the TeX Live version in your cache key (see
+  [Cache keys](#cache-keys)) if you want a rebuild after upgrading.
 - **mtime-independent.** A fresh checkout gives every file a new mtime.
   maketex's fast path misses, falls back to BLAKE3 content hashing, finds
   the hashes unchanged, and still exits "up to date". Restoring a cache
@@ -76,6 +76,7 @@ stderr), suitable for any other CI system or tooling:
   "error": "latex exited with code 1",
   "document": "/work/paper/main.tex",
   "engine": "pdflatex",
+  "engineReason": null,
   "pdf": null,
   "diagnostics": [
     {
@@ -85,19 +86,26 @@ stderr), suitable for any other CI system or tooling:
       "line": 12,
       "message": "Undefined control sequence",
       "category": "undefined-macro",
-      "context": "…"
+      "context": "…",
+      "hint": null
     }
   ]
 }
 ```
 
-`category` is a stable machine tag (`undefined-citation`,
-`undefined-reference`, `missing-file`, `missing-font`, `missing-glyph`,
-`package`, `overfull-hbox`, `undefined-macro`) — match on it rather than on
-message text.
+`category` is a stable machine tag — match on it rather than on message
+text: `undefined-citation`, `undefined-reference`, `duplicate-label`,
+`undefined-macro`, `missing-file`, `missing-tool`, `missing-font`,
+`missing-glyph`, `shell-escape-required`, `package`, `class`, `font`,
+`pdftex`, `overfull-hbox`, `overfull-vbox`, `underfull-hbox`,
+`underfull-vbox`, `timeout`, `cancelled`, `environment`. `hint` is an
+actionable next step (an install command, a flag to add) or `null`. `pdf`
+is the published PDF, or `null` when none was produced or it could not be
+published.
 
-Exit codes are conventional: `0` success, `1` build failure or runtime
-error, `2` configuration error.
+Exit codes: `0` success, `1` the document did not build, `2` usage or
+configuration error, `3` environment error (engine or tool not installed,
+database or file system trouble).
 
 [workflow command]: https://docs.github.com/en/actions/using-workflows/workflow-commands-for-github-actions
 
@@ -106,7 +114,7 @@ error, `2` configuration error.
 The `hashFiles(...)` key above gives an exact hit when sources are
 unchanged and falls back to the newest previous cache (`restore-keys`)
 otherwise — maketex then rebuilds only what the changed files invalidate.
-Including the TeX Live version in the key (e.g. from `kpsewhich
---version`) avoids paying one detection-triggered full rebuild after a
-distribution upgrade, but is optional: correctness never depends on the
-key.
+Include the TeX Live version in the key (for example, from `kpsewhich
+--version`) if a distribution upgrade should rebuild the document. maketex
+doesn't track files inside the distribution, so without it a restored
+cache counts as up to date even when the packages it used have changed.

@@ -24,6 +24,14 @@ void RuleNode::addOutput(FileNode* node)
         m_outputs.push_back(node);
 }
 
+void RuleNode::clearEdges()
+{
+    m_inputs.clear();
+    m_outputs.clear();
+    m_inputSet.clear();
+    m_outputSet.clear();
+}
+
 bool RuleNode::isStale(const StateDatabase& db) const
 {
     auto record = db.getRule(m_name);
