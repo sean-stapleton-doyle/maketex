@@ -98,6 +98,9 @@ private:
         std::optional<RunResult<ToolInvocation>> failure;
         std::string failedToolName;
         std::optional<std::error_code> snapshotError;
+        // Warnings from the tools that ran successfully (e.g. bibtex's
+        // "I didn't find a database entry").
+        std::vector<Diagnostic> diagnostics;
     };
 
     // Content digests keyed by weakly-canonical path string.

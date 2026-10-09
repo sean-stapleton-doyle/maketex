@@ -26,7 +26,9 @@ column tracks whether the fixture has been created on disk.
 ## Failure Cases
 
 Fixtures under `testdata/failures/` exercise the error-surfacing system.
-Each is expected to produce the documented exit code and error output.
+Each is expected to produce the documented exit code and error output;
+`test/integration/Failures_test.cpp` builds every one with the real engine
+and checks the first diagnostic's category, file, and line.
 
 ### Hard Errors (exit ≠ 0, no PDF)
 

@@ -121,6 +121,16 @@ namespace {
                 }
                 if (line[i] != '(')
                     continue;
+                // TeX Live quotes names containing spaces: ("./my file.tex"
+                if (i + 1 < line.size() && line[i + 1] == '"') {
+                    auto close = line.find('"', i + 2);
+                    if (close != std::string::npos) {
+                        auto token = std::string_view(line).substr(i + 2, close - (i + 2));
+                        m_stack.push_back(resolveToken(token, m_workingDir));
+                        i = close;
+                        continue;
+                    }
+                }
                 size_t j = i + 1;
                 while (j < line.size() && line[j] != ' ' && line[j] != '('
                     && line[j] != ')')
@@ -222,15 +232,19 @@ namespace {
                 continue;
 
             auto fileToken = std::string_view(line).substr(0, pos);
-            if (fileToken.empty()
-                || fileToken.find_first_of(" \t") != std::string_view::npos)
+            if (fileToken.size() >= 2 && fileToken.front() == '"' && fileToken.back() == '"')
+                fileToken = fileToken.substr(1, fileToken.size() - 2);
+            if (fileToken.empty())
                 continue;
 
             fs::path candidate { std::string(fileToken) };
             std::error_code ec;
             bool exists = fs::is_regular_file(
                 candidate.is_absolute() ? candidate : workingDir / candidate, ec);
-            if (!hasTexSourceExtension(candidate) && !exists)
+            // A token with spaces is only a file name if the file exists —
+            // otherwise prose like "Error at x.tex:3: …" would match.
+            bool hasSpace = fileToken.find_first_of(" \t") != std::string_view::npos;
+            if (hasSpace ? !exists : (!hasTexSourceExtension(candidate) && !exists))
                 continue;
 
             auto num = tryParseInt(std::string_view(line).substr(pos + 1, d - pos - 1));
@@ -259,6 +273,19 @@ namespace {
         if (auto ref = resolveToken(token, workingDir))
             return *ref;
         return SourceRef { displayFor(fs::path(token), workingDir), { } };
+    }
+
+    // Lines where TeX echoes the user's source after an error: "l.42 \\foo{(}"
+    // and the indented remainder on the next line. Their parentheses are the
+    // document's, not file opens, and must not reach the file stack.
+    bool isSourceEcho(const std::vector<std::string>& lines, size_t i)
+    {
+        auto isLineTag = [](std::string_view l) {
+            return l.size() > 2 && l.starts_with("l.") && std::isdigit(static_cast<unsigned char>(l[2]));
+        };
+        if (isLineTag(lines[i]))
+            return true;
+        return i > 0 && isLineTag(lines[i - 1]) && lines[i].starts_with(' ');
     }
 
     // A package or class error continues on lines prefixed with its name:
@@ -295,7 +322,8 @@ namespace {
     }
 
     // The line of `source` that loads `name` (a .sty via \usepackage or
-    // \RequirePackage, a .cls via \documentclass), or -1.
+    // \RequirePackage, a .cls via \documentclass, anything else via \input
+    // or \include), or -1.
     int loadingLine(const fs::path& source, const fs::path& name)
     {
         std::ifstream in(source);
@@ -303,11 +331,17 @@ namespace {
             return -1;
         const auto stem = name.stem().string();
         const bool isClass = name.extension() == ".cls";
+        const bool isPackage = name.extension() == ".sty";
+        // \input{chapters/intro} may be written with or without ".tex".
+        const auto withoutTex = name.extension() == ".tex"
+            ? fs::path(name).replace_extension().generic_string()
+            : name.generic_string();
         std::string line;
         for (int n = 1; std::getline(in, line); ++n) {
             auto code = std::string_view(line).substr(0, line.find('%'));
             bool loads = isClass ? code.contains("\\documentclass")
-                                 : (code.contains("\\usepackage") || code.contains("\\RequirePackage"));
+                : isPackage      ? (code.contains("\\usepackage") || code.contains("\\RequirePackage"))
+                                 : (code.contains("\\input") || code.contains("\\include"));
             if (!loads)
                 continue;
             // The name as a whole entry of the brace list.
@@ -322,7 +356,8 @@ namespace {
                     entry.remove_prefix(1);
                 while (!entry.empty() && entry.back() == ' ')
                     entry.remove_suffix(1);
-                if (entry == stem)
+                if (isClass || isPackage ? entry == stem
+                                         : (entry == withoutTex || entry == name.generic_string()))
                     return n;
                 if (comma == std::string_view::npos)
                     break;
@@ -350,7 +385,7 @@ namespace {
             if (d.category == "missing-file") {
                 d.missingFile = quotedName(d.message);
                 fs::path name { d.missingFile };
-                if (name.extension() == ".sty" || name.extension() == ".cls") {
+                if (!name.empty()) {
                     auto source = d.sourcePath.empty() ? texFile : d.sourcePath;
                     if (int line = loadingLine(source, name); line > 0) {
                         d.line = line;
@@ -444,10 +479,15 @@ namespace {
 
             // Fallback form: `! message`, attributed to the innermost open
             // file. Skip the "!  ==>" fatal-error summary line (two spaces
-            // after '!' mark a continuation, not a new error).
-            if (line.starts_with("! ") && !(line.size() > 2 && line[2] == ' ')) {
+            // after '!' mark a continuation, not a new error). Engine-level
+            // errors have no space: "!pdfTeX error: …", "!LuaTeX error: …".
+            bool bangError = line.starts_with("! ") && !(line.size() > 2 && line[2] == ' ');
+            bool engineError = line.size() > 1 && line[0] == '!' && line[1] != ' '
+                && line.contains(" error");
+            if (bangError || engineError) {
                 auto ctx = gatherContext(i);
-                std::string message = cleanErrorMessage(foldContinuation(line.substr(2), lines, i + 1));
+                std::string message = cleanErrorMessage(
+                    foldContinuation(line.substr(bangError ? 2 : 1), lines, i + 1));
                 const auto& ref = stack.current();
                 diags.push_back(Diagnostic {
                     .severity = Diagnostic::Severity::Error,
@@ -461,6 +501,8 @@ namespace {
                 continue;
             }
 
+            if (isSourceEcho(lines, i))
+                continue;
             stack.scan(line);
         }
 
@@ -513,16 +555,53 @@ namespace {
 
         auto attribute = [&](Diagnostic& d) {
             const auto& ref = stack.current();
+            // Warnings raised while LaTeX re-reads its .aux at the end of
+            // the run ("Label multiply defined") would point at a generated
+            // file; the document is the useful place to look.
+            if (fs::path(ref.display).extension() == ".aux") {
+                auto root = makeRootRef(texFile);
+                d.file = root.display;
+                d.sourcePath = root.abs;
+                return;
+            }
             d.file = ref.display;
             d.sourcePath = ref.abs;
+        };
+
+        auto push = [&](Diagnostic d, std::string message) {
+            attribute(d);
+            d.message = std::move(message);
+            diags.push_back(std::move(d));
+        };
+
+        // "Overfull \hbox (12.0pt too wide) in paragraph at lines 10--12",
+        // "… detected at line 7", "… in alignment at lines 3--9".
+        static const std::regex kBox { R"(^(Overfull|Underfull) \\([hv]box) )" };
+        static const std::regex kBoxLine { R"((?:at lines?|detected at line) (\d+))" };
+        // "Package natbib Warning: …", "Class memoir Warning: …",
+        // "LaTeX Font Warning: …" — continued on "(natbib)"/"(Font)" lines.
+        static const std::regex kNamedWarning {
+            R"(^(?:(Package|Class) ([\w.-]+)|LaTeX (Font)) Warning: (.*)$)"
         };
 
         for (size_t i = 0; i < lines.size(); ++i) {
             const auto& line = lines[i];
 
-            // LaTeX Warning: <message>
+            // LaTeX Warning: <message>, continued on indented lines.
             if (line.starts_with("LaTeX Warning: ")) {
                 std::string msg = line.substr(15);
+                std::string rawCtx = line;
+                // LaTeX aligns continuations under the message text.
+                while (i + 1 < lines.size() && lines[i + 1].starts_with("  ")
+                    && lines[i + 1].find_first_not_of(' ') != std::string::npos) {
+                    ++i;
+                    rawCtx += "\n" + lines[i];
+                    auto rest = std::string_view(lines[i]);
+                    while (!rest.empty() && rest.front() == ' ')
+                        rest.remove_prefix(1);
+                    msg += ' ';
+                    msg += rest;
+                }
 
                 // Skip summary lines — individual warnings already cover them,
                 // and rerun signals are handled by LogParser, not surfaced here.
@@ -532,101 +611,99 @@ namespace {
 
                 int lineNum = extractInputLine(msg);
                 stripInputLineSuffix(msg);
-
-                Diagnostic d {
-                    .severity = Diagnostic::Severity::Warning,
-                    .line = lineNum,
-                    .category = categorizeWarning(msg),
-                    .rawContext = line,
-                };
-                attribute(d);
-                d.message = std::move(msg);
-                diags.push_back(std::move(d));
+                push(Diagnostic {
+                         .severity = Diagnostic::Severity::Warning,
+                         .line = lineNum,
+                         .category = categorizeWarning(msg),
+                         .rawContext = std::move(rawCtx),
+                     },
+                    std::move(msg));
                 continue;
             }
 
-            // Package <name> Warning: <message>, with continuation lines
-            // prefixed "(<name>)" folded into a single message.
-            if (line.starts_with("Package ")) {
-                auto warnPos = line.find(" Warning: ");
-                if (warnPos != std::string::npos) {
-                    std::string name = line.substr(8, warnPos - 8);
-                    std::string msg = line.substr(warnPos + 10);
-                    std::string rawCtx = line;
+            std::smatch named;
+            if (std::regex_match(line, named, kNamedWarning)) {
+                bool isFont = named[3].matched;
+                std::string name = isFont ? "Font" : named[2].str();
+                std::string msg = named[4].str();
+                std::string rawCtx = line;
 
-                    std::string contPrefix = "(" + name + ")";
-                    while (i + 1 < lines.size()
-                        && lines[i + 1].starts_with(contPrefix)) {
-                        ++i;
-                        rawCtx += "\n" + lines[i];
-                        auto rest = std::string_view(lines[i]).substr(contPrefix.size());
-                        while (!rest.empty() && rest.front() == ' ')
-                            rest.remove_prefix(1);
-                        if (!rest.empty()) {
-                            msg += ' ';
-                            msg += rest;
-                        }
+                std::string contPrefix = "(" + name + ")";
+                while (i + 1 < lines.size() && lines[i + 1].starts_with(contPrefix)) {
+                    ++i;
+                    rawCtx += "\n" + lines[i];
+                    auto rest = std::string_view(lines[i]).substr(contPrefix.size());
+                    while (!rest.empty() && rest.front() == ' ')
+                        rest.remove_prefix(1);
+                    if (!rest.empty()) {
+                        msg += ' ';
+                        msg += rest;
                     }
-
-                    int lineNum = extractInputLine(msg);
-                    stripInputLineSuffix(msg);
-
-                    Diagnostic d {
-                        .severity = Diagnostic::Severity::Warning,
-                        .line = lineNum,
-                        .category = "package",
-                        .rawContext = std::move(rawCtx),
-                    };
-                    attribute(d);
-                    d.message = "Package ";
-                    d.message += name;
-                    d.message += ": ";
-                    d.message += msg;
-                    diags.push_back(std::move(d));
-                    continue;
                 }
+
+                int lineNum = extractInputLine(msg);
+                stripInputLineSuffix(msg);
+                std::string category = categorizeWarning(msg);
+                if (category.empty())
+                    category = isFont ? "font" : (named[1] == "Class" ? "class" : "package");
+                std::string label = isFont ? "Font" : named[1].str() + " " + name;
+                push(Diagnostic {
+                         .severity = Diagnostic::Severity::Warning,
+                         .line = lineNum,
+                         .category = std::move(category),
+                         .rawContext = std::move(rawCtx),
+                     },
+                    label + ": " + msg);
+                continue;
             }
 
             // Missing character: There is no X in font Y!
             if (line.starts_with("Missing character: ")) {
-                Diagnostic d {
-                    .severity = Diagnostic::Severity::Warning,
-                    .category = "missing-glyph",
-                    .rawContext = line,
-                };
-                attribute(d);
-                d.message = line;
-                diags.push_back(std::move(d));
+                push(Diagnostic {
+                         .severity = Diagnostic::Severity::Warning,
+                         .category = "missing-glyph",
+                         .rawContext = line,
+                     },
+                    line);
                 continue;
             }
 
-            // Overfull \hbox (Xpt too wide) in paragraph at lines N--M
-            if (line.starts_with("Overfull \\hbox")) {
-                // Extract the starting line from "at lines N--M" or "at line N".
+            // pdfTeX warning (ext4): destination with the same identifier …
+            if (line.starts_with("pdfTeX warning")) {
+                push(Diagnostic {
+                         .severity = Diagnostic::Severity::Warning,
+                         .category = "pdftex",
+                         .rawContext = line,
+                     },
+                    line);
+                continue;
+            }
+
+            std::smatch box;
+            if (std::regex_search(line, box, kBox)) {
                 int lineNum = -1;
-                auto pos = line.rfind("at lines ");
-                if (pos != std::string::npos) {
-                    auto start = pos + 9;
-                    auto end = start;
-                    while (end < line.size() && std::isdigit((unsigned char)line[end]))
-                        ++end;
-                    lineNum = tryParseInt(
-                        std::string_view(line).substr(start, end - start))
-                                  .value_or(-1);
-                }
-
-                Diagnostic d {
-                    .severity = Diagnostic::Severity::Warning,
-                    .line = lineNum,
-                    .category = "overfull-hbox",
-                    .rawContext = line,
-                };
-                attribute(d);
-                d.message = line;
-                diags.push_back(std::move(d));
+                if (std::smatch at; std::regex_search(line, at, kBoxLine))
+                    lineNum = tryParseInt(at[1].str()).value_or(-1);
+                bool overfull = box[1] == "Overfull";
+                std::string category = (overfull ? "overfull-" : "underfull-") + box[2].str();
+                // Underfull boxes are badness reports, rarely actionable.
+                push(Diagnostic {
+                         .severity = overfull ? Diagnostic::Severity::Warning
+                                              : Diagnostic::Severity::Info,
+                         .line = lineNum,
+                         .category = std::move(category),
+                         .rawContext = line,
+                     },
+                    line);
+                // The box's typeset content follows up to a blank line; its
+                // parentheses are the document's text, not file opens.
+                while (i + 1 < lines.size() && !lines[i + 1].empty())
+                    ++i;
                 continue;
             }
 
+            if (isSourceEcho(lines, i))
+                continue;
             stack.scan(line);
         }
 
@@ -635,34 +712,33 @@ namespace {
 
     // ── bibtex ────────────────────────────────────────────────────────────────
 
+    // BibTeX reports an error on one line and where it happened either on
+    // the same line or the next:
+    //   I was expecting a `,' or a `}'---line 1 of file refs.bib
+    //   I couldn't open database file refs.bib
+    //   ---line 4 of file main.aux
+    // followed by " : " lines quoting the offending input.
     std::vector<Diagnostic> extractBibtex(const std::string& output)
     {
+        std::vector<std::string> lines;
+        {
+            std::istringstream stream(output);
+            std::string line;
+            while (std::getline(stream, line))
+                lines.push_back(std::move(line));
+        }
+        static const std::regex kWhere { R"(---line (\d+) of file (.+)$)" };
+        // Status chatter, not errors.
+        auto isChatter = [](std::string_view l) {
+            return l.starts_with("This is BibTeX") || l.starts_with("The top-level auxiliary file")
+                || l.starts_with("The style file") || l.starts_with("Database file #")
+                || l.starts_with("(There w") || l.starts_with("I'm skipping whatever remains")
+                || l.starts_with(" : ") || l.empty();
+        };
+
         std::vector<Diagnostic> diags;
-        std::istringstream stream(output);
-        std::string line;
-
-        while (std::getline(stream, line)) {
-            // "I couldn't open database file foo.bib"
-            if (line.find("I couldn't open") != std::string::npos) {
-                // Extract the filename from "... file <name>"
-                std::string msg = line;
-                auto filePos = line.rfind("file ");
-                std::string file;
-                if (filePos != std::string::npos)
-                    file = line.substr(filePos + 5);
-
-                diags.push_back(Diagnostic {
-                    .severity = Diagnostic::Severity::Error,
-                    .file = std::move(file),
-                    .line = -1,
-                    .message = std::move(msg),
-                    .category = "missing-file",
-                    .rawContext = output,
-                });
-                return diags; // one fatal error is enough
-            }
-
-            // "Warning--..." lines
+        for (size_t i = 0; i < lines.size(); ++i) {
+            const auto& line = lines[i];
             if (line.starts_with("Warning--")) {
                 std::string msg = line.substr(9);
                 std::string category;
@@ -674,9 +750,56 @@ namespace {
                     .category = std::move(category),
                     .rawContext = line,
                 });
+                continue;
             }
-        }
+            if (isChatter(line) || line.starts_with("---"))
+                continue;
 
+            Diagnostic d {
+                .severity = Diagnostic::Severity::Error,
+                .rawContext = line,
+            };
+            std::string message = line;
+            std::smatch where;
+            const std::string* whereLine = nullptr;
+            if (std::regex_search(line, where, kWhere)) {
+                message = line.substr(0, static_cast<size_t>(where.position(0)));
+                whereLine = &line;
+            } else if (i + 1 < lines.size() && lines[i + 1].starts_with("---line ")) {
+                ++i;
+                d.rawContext += "\n" + lines[i];
+                whereLine = &lines[i];
+            }
+            if (whereLine && std::regex_search(*whereLine, where, kWhere)) {
+                d.file = where[2].str();
+                d.line = tryParseInt(where[1].str()).value_or(-1);
+            }
+            while (i + 1 < lines.size() && lines[i + 1].starts_with(" : "))
+                d.rawContext += "\n" + lines[++i];
+
+            constexpr std::string_view kCouldntOpen = "I couldn't open ";
+            if (message.starts_with(kCouldntOpen)) {
+                d.category = "missing-file";
+                // "… database file refs.bib" / "… file name `main.aux'"
+                auto quoted = quotedName(message);
+                d.missingFile = !quoted.empty()
+                    ? quoted
+                    : message.substr(message.rfind(' ') + 1);
+                // The .aux location is where bibtex read the name; the
+                // useful location is the missing file itself.
+                d.file = d.missingFile;
+                d.line = -1;
+            }
+            d.message = std::move(message);
+            diags.push_back(std::move(d));
+        }
+        // "I found no database files" only restates a missing database.
+        bool missingDatabase = std::ranges::any_of(diags,
+            [](const Diagnostic& d) { return d.category == "missing-file"; });
+        if (missingDatabase)
+            std::erase_if(diags, [](const Diagnostic& d) {
+                return d.message.starts_with("I found no database files");
+            });
         return diags;
     }
 
@@ -744,13 +867,17 @@ namespace {
                 { "## ", true, kWarning, true } });
     }
 
-    // makeglossaries is a Perl script that delegates to makeindex/xindy.
-    // Errors are reported as lines containing "Error" (fatal) or "Warning".
+    // makeglossaries is a Perl script that delegates to makeindex/xindy:
+    // the indexer's own "!! "/"## " lines, plus its own "Error:" reports.
+    // Not any line merely containing "Error" — entry text can.
     std::vector<Diagnostic> extractMakeglossaries(const std::string& output)
     {
         return extractByLinePatterns(output,
-            { { "Error", false, kError, false },
-                { "Warning", false, kWarning, false } });
+            { { "!! ", true, kError, true },
+                { "## ", true, kWarning, true },
+                { "*** ", true, kError, true },
+                { "Error: ", false, kError, false },
+                { "Warning: ", false, kWarning, false } });
     }
 
     // pythontex reports structured messages as "PythonTeX error" / "PythonTeX
@@ -820,10 +947,17 @@ namespace diagnostics {
         case InvokerKind::PdfLaTeX:
         case InvokerKind::XeLaTeX:
         case InvokerKind::LuaLaTeX:
-            if (result.success())
+            if (result.success()) {
                 diags = extractLatexWarnings(result.stdoutOutput, result.invocation.texFile);
-            else
+            } else {
+                // Errors first; the warnings of a failed pass still explain
+                // a lot (an undefined reference before the fatal error), but
+                // box-layout noise does not.
                 diags = extractLatex(result.stdoutOutput, result.invocation.texFile);
+                for (auto& w : extractLatexWarnings(result.stdoutOutput, result.invocation.texFile))
+                    if (!w.category.starts_with("overfull-") && !w.category.starts_with("underfull-"))
+                        diags.push_back(std::move(w));
+            }
             break;
         default:
             break;
@@ -839,34 +973,49 @@ namespace diagnostics {
     {
         if (auto abnormal = abnormalRun(result))
             return { *abnormal };
-        if (result.success())
-            return { };
+
+        // Tools split their reports between the streams (makeindex writes
+        // to stderr); parse both.
+        std::string output = result.stdoutOutput;
+        if (!result.stderrOutput.empty()) {
+            if (!output.empty() && output.back() != '\n')
+                output += '\n';
+            output += result.stderrOutput;
+        }
 
         std::vector<Diagnostic> diags;
-
         switch (result.kind) {
         case InvokerKind::Bibtex:
-            diags = extractBibtex(result.stdoutOutput);
+            diags = extractBibtex(output);
             break;
         case InvokerKind::Biber:
-            diags = extractBiber(result.stdoutOutput);
+            diags = extractBiber(output);
             break;
         case InvokerKind::Makeindex:
-            diags = extractMakeindex(result.stdoutOutput);
+            diags = extractMakeindex(output);
             break;
         case InvokerKind::Makeglossaries:
-            diags = extractMakeglossaries(result.stdoutOutput);
+            diags = extractMakeglossaries(output);
             break;
         case InvokerKind::Pythontex:
-            diags = extractPythontex(result.stdoutOutput);
+            diags = extractPythontex(output);
             break;
         default:
             break;
         }
 
-        if (diags.empty())
-            diags.push_back(makeFallback(result.stdoutOutput));
-
+        // A successful run still reports its warnings (a citation with no
+        // database entry), but nothing that claims it failed.
+        if (result.success()) {
+            std::erase_if(diags, [](const Diagnostic& d) {
+                return d.severity == Diagnostic::Severity::Error;
+            });
+            return diags;
+        }
+        if (std::ranges::none_of(diags, [](const Diagnostic& d) {
+                return d.severity == Diagnostic::Severity::Error;
+            }))
+            diags.insert(diags.begin(), makeFallback(output));
         return diags;
     }
 

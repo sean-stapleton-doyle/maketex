@@ -15,6 +15,7 @@
 
 #include <algorithm>
 #include <ctime>
+#include <iterator>
 #include <unordered_set>
 
 namespace maketex {
@@ -371,6 +372,7 @@ BuildDriver::ToolPassOutcome BuildDriver::runStaleTools(
 
         outcome.ranAny = true;
         outcome.outputsChanged = outcome.outputsChanged || changed;
+        std::ranges::move(diagnostics::extract(toolResult), std::back_inserter(outcome.diagnostics));
     }
     return outcome;
 }
@@ -469,6 +471,7 @@ DriverResult BuildDriver::run()
             // Persist any freshly computed states so the next invocation's
             // (mtime, size) fast path can skip rehashing.
             persistFileStates();
+            result.diagnostics = std::move(tools.diagnostics);
             if (!tools.ranAny) {
                 notify({ .kind = BuildEvent::Kind::SkippedUpToDate });
                 result.upToDate = true;
@@ -480,6 +483,8 @@ DriverResult BuildDriver::run()
 
     auto& latexRule = m_graph.getOrAddRule(engineRuleName());
     const auto command = m_inv.texFile.string();
+    // Tool warnings collected across passes; reported with the result.
+    std::vector<Diagnostic> toolWarnings;
 
     for (int pass = 0; pass < m_maxPasses; ++pass) {
         auto before = takeSnapshot(tracker);
@@ -543,6 +548,7 @@ DriverResult BuildDriver::run()
             toolFailure(tools);
             return result;
         }
+        std::ranges::move(tools.diagnostics, std::back_inserter(toolWarnings));
 
         bool rerun = ctx.log().rerunNeeded || readBackChanged
             || missingInputAppeared(ctx.log()) || sourceEditedDuringPass(sourcesBefore, passStart)
@@ -552,6 +558,7 @@ DriverResult BuildDriver::run()
             persistFileStates();
             result.success = true;
             result.diagnostics = diagnostics::extract(engineResult);
+            std::ranges::move(toolWarnings, std::back_inserter(result.diagnostics));
             return result;
         }
     }

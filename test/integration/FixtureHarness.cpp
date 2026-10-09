@@ -5,6 +5,7 @@
 
 #include <gtest/gtest.h>
 
+#include <algorithm>
 #include <array>
 #include <cstdlib>
 #include <fstream>
@@ -46,6 +47,13 @@ namespace {
         return ss.str();
     }
 
+    // "failures/err-x" → "failures_err-x": one path component.
+    std::string sanitized(std::string name)
+    {
+        std::ranges::replace(name, '/', '_');
+        return name;
+    }
+
 } // namespace
 
 bool hasProgram(const std::string& program)
@@ -79,7 +87,7 @@ bool hasTexFile(const std::string& file)
 }
 
 FixtureCopy::FixtureCopy(const std::string& name)
-    : m_dir(test_utils::uniqueTempDir("maketex_it_" + name))
+    : m_dir(test_utils::uniqueTempDir("maketex_it_" + sanitized(name)))
 {
     fs::path source = fs::path(MAKETEX_TESTDATA_DIR) / name;
     if (!fs::is_directory(source))
