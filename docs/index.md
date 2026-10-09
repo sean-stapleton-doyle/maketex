@@ -24,6 +24,7 @@ skips several); CI installs a full TeX Live so all of them run.
 
 | Document | Status |
 |---|---|
+| [Test Gap Plan](test_plan.md) | Proposed (2026-10-09) |
 | [Diagnostics Plan](diagnostics_plan.md) | Implemented (2026-06-08) |
 | [Process Execution Plan](process_execution_plan.md) | Superseded — see architecture.md for divergences |
 | [latexmk Replacement](latexmk_replacement.md) | Original specification |
