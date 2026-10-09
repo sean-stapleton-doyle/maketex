@@ -7,6 +7,12 @@
 
 namespace maketex::cli {
 
+// Process exit codes, shared by every command.
+inline constexpr int kExitSuccess = 0;
+inline constexpr int kExitBuildFailed = 1; // the document did not build
+inline constexpr int kExitUsage = 2; // bad flags, config, or input file
+inline constexpr int kExitEnvironment = 3; // engine/tool missing, I/O trouble
+
 enum class Command {
     Build,
     Watch,

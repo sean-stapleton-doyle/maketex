@@ -173,3 +173,9 @@ TEST(ParseCliArgs, negatedFlagsUndoConfig)
     EXPECT_EQ(result.args->synctex, false);
     EXPECT_EQ(result.args->haltOnError, true);
 }
+
+TEST(ParseCliArgs, usageErrorsExitTwoAndHelpExitsZero)
+{
+    EXPECT_EQ(parseCliArgs(args({ "build", "--no-such-flag" })).exitCode, maketex::cli::kExitUsage);
+    EXPECT_EQ(parseCliArgs(args({ "--help" })).exitCode, maketex::cli::kExitSuccess);
+}

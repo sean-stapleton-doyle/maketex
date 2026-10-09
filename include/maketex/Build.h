@@ -132,6 +132,15 @@ struct BuildFileSets {
     std::vector<std::filesystem::path> generated;
 };
 
+// The TeX job name a build of options uses: a -jobname among the engine's
+// extra options, else the tex file's stem. Names the .aux/.log/.pdf files.
+std::string jobNameFor(const BuildOptions& options);
+
+// The lock file a build of jobName holds in outDir for its duration, so
+// two maketex processes building the same document take turns.
+std::filesystem::path buildLockPath(const std::filesystem::path& outDir,
+    const std::string& jobName);
+
 // Scans the .fls left by the last build of options.texFile. Returns nullopt
 // when no .fls exists (never built, or cleaned) or it cannot be parsed.
 // Consumers: the CLI's watch mode (sources = the set to watch) and clean

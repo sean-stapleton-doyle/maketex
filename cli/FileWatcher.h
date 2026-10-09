@@ -4,7 +4,9 @@
 #include <condition_variable>
 #include <cstdint>
 #include <filesystem>
+#include <functional>
 #include <mutex>
+#include <optional>
 #include <stop_token>
 #include <vector>
 
@@ -27,15 +29,28 @@ public:
     explicit FileWatcher(std::chrono::milliseconds pollInterval,
         std::chrono::milliseconds quietPeriod = std::chrono::milliseconds(200));
 
+    // Paths for which this returns true are never watched — applied after
+    // directories are expanded, so a watched directory cannot smuggle in
+    // the build's own outputs.
+    using Exclusion = std::function<bool(const std::filesystem::path&)>;
+
     // Replaces the watched paths. Directories contribute their regular files
     // (non-recursive) at poll time, so newly created files are seen.
-    void setWatchSet(std::vector<std::filesystem::path> paths);
+    void setWatchSet(std::vector<std::filesystem::path> paths, Exclusion exclude = { });
+
+    // The current state of the watch set, to pass to waitForChange later.
+    std::vector<Entry> captureBaseline() const;
 
     // Blocks until at least one watched file changes, then keeps polling
     // until a quiet period passes so editor save sequences coalesce; returns
     // the changed paths. Returns empty when stopToken was triggered or
     // nudge() was called — callers distinguish via stopToken.
-    std::vector<std::filesystem::path> waitForChange(std::stop_token stopToken);
+    //
+    // Changes are measured against `since` when given — a baseline captured
+    // before a build, so a save made while it ran still counts. Paths not in
+    // `since` (discovered by that build) start from their current state.
+    std::vector<std::filesystem::path> waitForChange(std::stop_token stopToken,
+        const std::optional<std::vector<Entry>>& since = std::nullopt);
 
     // Wakes a pending waitForChange immediately (forced rebuild).
     void nudge();
@@ -58,6 +73,7 @@ private:
     std::chrono::milliseconds m_pollInterval;
     std::chrono::milliseconds m_quietPeriod;
     std::vector<std::filesystem::path> m_watchSet;
+    Exclusion m_exclude;
 
     mutable std::mutex m_mutex;
     std::condition_variable_any m_wake;

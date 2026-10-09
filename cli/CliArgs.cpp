@@ -134,7 +134,10 @@ ParseResult parseCliArgs(const std::vector<std::string>& args)
         std::vector<std::string> reversed(args.rbegin(), args.rend());
         app.parse(std::move(reversed));
     } catch (const CLI::ParseError& e) {
-        return { .args = std::nullopt, .exitCode = app.exit(e) };
+        // --help/--version exit 0; every usage error exits 2 (CLI11's own
+        // codes run past 100 and mean nothing to callers).
+        int code = app.exit(e);
+        return { .args = std::nullopt, .exitCode = code == 0 ? 0 : kExitUsage };
     }
 
     if (app.got_subcommand(watch))

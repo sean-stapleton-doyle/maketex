@@ -2,6 +2,13 @@
 
 #include "CleanPlan.h"
 
+#include "maketex/StateDatabase.h"
+
+#include <SQLiteCpp/SQLiteCpp.h>
+
+#include <algorithm>
+#include <memory>
+
 #include <filesystem>
 #include <iostream>
 #include <set>
@@ -31,7 +38,10 @@ int runCleanCommand(const EffectiveOptions& options)
     const BuildOptions& build = options.build;
     const fs::path outputDir = build.resolvedOutputDir();
     const fs::path texDir = build.texFile.parent_path();
-    const std::string jobName = build.texFile.stem().string();
+    const std::string jobName = jobNameFor(build);
+    // `-o .`: the output directory is the user's source directory.
+    std::error_code sameDirEc;
+    const bool userDirectory = fs::equivalent(outputDir, texDir, sameDirEc);
 
     // In default-output mode the PDF/SyncTeX copies published beside the
     // tex file are this build's products too, and a pre-.maketex state
@@ -47,7 +57,7 @@ int runCleanCommand(const EffectiveOptions& options)
 
     auto plan = computeCleanPlan(scanBuildFiles(build), build.texFile,
         outputDir, jobName, options.extras.cleanAll,
-        options.extras.cleanExtraExtensions, published);
+        options.extras.cleanExtraExtensions, published, userDirectory);
 
     // Builds made before the hidden default directory existed left their
     // aux files next to the sources. When the default location has no build
@@ -60,12 +70,38 @@ int runCleanCommand(const EffectiveOptions& options)
         mergePlans(plan,
             computeCleanPlan(scanBuildFiles(legacy), build.texFile, texDir,
                 jobName, options.extras.cleanAll,
-                options.extras.cleanExtraExtensions));
+                options.extras.cleanExtraExtensions, { }, /*userDirectory=*/true));
+    }
+
+    // The state database is shared by every document built into this
+    // output directory: --all forgets only this one, and deletes the file
+    // only when no other document has state in it.
+    const fs::path db = outputDir / ".maketex.db";
+    bool forgetInSharedDb = false;
+    if (auto it = std::ranges::find(plan.remove, db); it != plan.remove.end()) {
+        try {
+            StateDatabase state(std::make_unique<SQLite::Database>(db.string(), SQLite::OPEN_READWRITE));
+            auto jobs = state.jobs();
+            std::erase(jobs, jobName);
+            if (!jobs.empty()) {
+                plan.remove.erase(it);
+                forgetInSharedDb = true;
+            }
+        } catch (const std::exception&) {
+            // Unreadable database: removing it is the right cleanup.
+        }
     }
 
     for (const auto& p : plan.skippedOutside)
         std::cerr << "maketex: skipping " << p.string()
                   << " (outside the output directory)\n";
+
+    if (forgetInSharedDb && !options.extras.dryRun) {
+        StateDatabase state(std::make_unique<SQLite::Database>(db.string(), SQLite::OPEN_READWRITE));
+        state.forgetJob(jobName);
+        std::cout << "forgot " << jobName << " in " << db.string()
+                  << " (other documents still use it)\n";
+    }
 
     if (plan.remove.empty()) {
         std::cout << "maketex: nothing to clean\n";

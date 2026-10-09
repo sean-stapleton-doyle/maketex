@@ -33,6 +33,7 @@ CleanPlan computeCleanPlan(const std::optional<BuildFileSets>& fileSets,
     const std::string& jobName,
     bool all,
     const std::vector<std::string>& extraExtensions,
-    const std::vector<std::filesystem::path>& publishedArtifacts = { });
+    const std::vector<std::filesystem::path>& publishedArtifacts = { },
+    bool userDirectory = false);
 
 } // namespace maketex::cli

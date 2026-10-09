@@ -36,7 +36,7 @@ static int run(int argc, char* argv[])
             auto loaded = loadConfig(*configPath);
             if (!loaded) {
                 std::cerr << "maketex: " << loaded.error() << "\n";
-                return 2;
+                return kExitUsage;
             }
             for (const auto& warning : loaded->warnings)
                 std::cerr << "maketex: warning: " << warning << "\n";
@@ -47,7 +47,7 @@ static int run(int argc, char* argv[])
     auto options = assembleOptions(*parsed.args, config);
     if (!options) {
         std::cerr << "maketex: " << options.error() << "\n";
-        return 2;
+        return kExitUsage;
     }
 
     switch (options->command) {
@@ -68,6 +68,6 @@ int main(int argc, char* argv[])
     } catch (const std::exception& e) {
         // Spawn failures (latex not installed), database errors, etc.
         std::cerr << "maketex: " << e.what() << "\n";
-        return 1;
+        return kExitEnvironment;
     }
 }

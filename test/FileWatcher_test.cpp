@@ -6,6 +6,9 @@
 
 #include <algorithm>
 #include <filesystem>
+#include <fstream>
+#include <stop_token>
+#include <thread>
 
 namespace fs = std::filesystem;
 using maketex::cli::FileWatcher;
@@ -101,4 +104,51 @@ TEST_F(FileWatcherTest, untouchedSiblingsAreNotReported)
     auto changed = FileWatcher::diff(before, after);
     EXPECT_TRUE(contains(changed, a));
     EXPECT_FALSE(contains(changed, b));
+}
+
+TEST_F(FileWatcherTest, changeBeforeWaitingIsSeenAgainstAnEarlierBaseline)
+{
+    // A save made while a build runs happens between captureBaseline() and
+    // waitForChange(): it must still be reported.
+    auto file = m_dir / "main.tex";
+    std::ofstream(file) << "v1";
+    FileWatcher watcher(std::chrono::milliseconds(20), std::chrono::milliseconds(20));
+    watcher.setWatchSet({ file });
+    auto preBuild = watcher.captureBaseline();
+
+    std::this_thread::sleep_for(std::chrono::milliseconds(20));
+    std::ofstream(file) << "v2, saved mid-build";
+
+    std::stop_source stop;
+    auto changed = watcher.waitForChange(stop.get_token(), preBuild);
+    ASSERT_EQ(changed.size(), 1u);
+    EXPECT_EQ(changed[0], file);
+}
+
+TEST_F(FileWatcherTest, pathsRevealedByTheBuildAreNotChanges)
+{
+    auto tex = m_dir / "main.tex";
+    auto chapter = m_dir / "chapter.tex";
+    std::ofstream(tex) << "x";
+    std::ofstream(chapter) << "y";
+    FileWatcher watcher(std::chrono::milliseconds(20), std::chrono::milliseconds(20));
+    watcher.setWatchSet({ tex });
+    auto preBuild = watcher.captureBaseline();
+    watcher.setWatchSet({ tex, chapter }); // the build found chapter.tex
+
+    std::stop_source stop;
+    std::jthread stopper([&] {
+        std::this_thread::sleep_for(std::chrono::milliseconds(200));
+        stop.request_stop();
+    });
+    EXPECT_TRUE(watcher.waitForChange(stop.get_token(), preBuild).empty());
+}
+
+TEST_F(FileWatcherTest, exclusionAppliesInsideWatchedDirectories)
+{
+    auto pdf = m_dir / "main.pdf";
+    std::ofstream(pdf) << "%PDF";
+    FileWatcher watcher(std::chrono::milliseconds(20), std::chrono::milliseconds(20));
+    watcher.setWatchSet({ m_dir }, [&](const fs::path& p) { return p.extension() == ".pdf"; });
+    EXPECT_TRUE(watcher.captureBaseline().empty());
 }

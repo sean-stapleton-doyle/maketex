@@ -145,9 +145,17 @@ Two machine formats are available on `build` (see [ci.md](ci.md)):
   (`::error file=…,line=…::…`), which surface as inline annotations on
   pull requests.
 
-Exit codes: `0` success, `1` build failure or runtime error (engine missing,
-database trouble), `2` configuration error (bad engine name, missing input
-file). Malformed command lines exit non-zero with CLI11's own codes.
+Exit codes:
+
+| Code | Meaning |
+|---|---|
+| `0` | success (also `--help` and `--version`) |
+| `1` | the document did not build (TeX or tool errors, no convergence) |
+| `2` | usage error: bad flag, invalid config, input file not found |
+| `3` | environment error: engine or tool not installed, database or file system trouble |
+
+With `--format=json`, stdout always carries exactly one JSON document, even
+for exit code 3.
 
 ## Watching
 

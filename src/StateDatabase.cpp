@@ -54,6 +54,9 @@ StateDatabase::StateDatabase(std::unique_ptr<SQLite::Database> db,
     : m_db(std::move(db))
     , m_codec(config.projectRoot)
 {
+    // Two maketex processes on one output directory (a watch session and a
+    // manual build) take turns instead of failing with SQLITE_BUSY.
+    m_db->setBusyTimeout(10'000);
     m_db->exec("PRAGMA journal_mode=WAL");
     m_db->exec("PRAGMA foreign_keys=ON");
     applySchema();
@@ -123,22 +126,7 @@ void StateDatabase::resetIncompatibleState(const std::string& fingerprint,
         if (jobName.empty()) {
             m_db->exec("DELETE FROM rule_inputs; DELETE FROM rules;");
         } else {
-            std::vector<std::string> doomed;
-            SQLite::Statement q(*m_db, "SELECT name FROM rules");
-            const std::string suffix = ":" + jobName;
-            while (q.executeStep()) {
-                std::string name = q.getColumn(0).getString();
-                std::string_view base = name;
-                base = base.substr(0, base.find('#'));
-                if (base.ends_with(suffix))
-                    doomed.push_back(std::move(name));
-            }
-            SQLite::Statement del(*m_db, "DELETE FROM rules WHERE name = ?");
-            for (const auto& name : doomed) {
-                del.bind(1, name);
-                del.exec();
-                del.reset();
-            }
+            deleteJobRules(jobName);
         }
         m_wasReset = true;
     }
@@ -148,6 +136,47 @@ void StateDatabase::resetIncompatibleState(const std::string& fingerprint,
 #ifdef MAKETEX_VERSION
     setMeta("maketex_version", MAKETEX_VERSION); // informational only
 #endif
+    tx.commit();
+}
+
+void StateDatabase::deleteJobRules(const std::string& jobName)
+{
+    // Every rule name ends in ":<job>", plus a "#…" suffix for derived
+    // records.
+    std::vector<std::string> doomed;
+    SQLite::Statement q(*m_db, "SELECT name FROM rules");
+    const std::string suffix = ":" + jobName;
+    while (q.executeStep()) {
+        std::string name = q.getColumn(0).getString();
+        std::string_view base = name;
+        base = base.substr(0, base.find('#'));
+        if (base.ends_with(suffix))
+            doomed.push_back(std::move(name));
+    }
+    SQLite::Statement del(*m_db, "DELETE FROM rules WHERE name = ?");
+    for (const auto& name : doomed) {
+        del.bind(1, name);
+        del.exec();
+        del.reset();
+    }
+}
+
+std::vector<std::string> StateDatabase::jobs() const
+{
+    std::vector<std::string> jobs;
+    SQLite::Statement q(*m_db, "SELECT key FROM meta WHERE key LIKE 'fingerprint:%'");
+    while (q.executeStep())
+        jobs.push_back(q.getColumn(0).getString().substr(12));
+    return jobs;
+}
+
+void StateDatabase::forgetJob(const std::string& jobName)
+{
+    SQLite::Transaction tx(*m_db);
+    deleteJobRules(jobName);
+    SQLite::Statement del(*m_db, "DELETE FROM meta WHERE key = ?");
+    del.bind(1, "fingerprint:" + jobName);
+    del.exec();
     tx.commit();
 }
 
@@ -245,7 +274,23 @@ void StateDatabase::setRuleInputs(const std::string& ruleName,
     const std::vector<std::pair<std::string, Hash>>& inputs)
 {
     SQLite::Transaction tx(*m_db);
+    writeRuleInputs(ruleName, inputs);
+    tx.commit();
+}
 
+void StateDatabase::recordRun(const RuleRecord& rule,
+    const std::vector<std::pair<std::string, Hash>>& inputs)
+{
+    SQLite::Transaction tx(*m_db);
+    // rules must exist before rule_inputs can reference it (FK constraint).
+    upsertRule(rule);
+    writeRuleInputs(rule.name, inputs);
+    tx.commit();
+}
+
+void StateDatabase::writeRuleInputs(const std::string& ruleName,
+    const std::vector<std::pair<std::string, Hash>>& inputs)
+{
     SQLite::Statement del(*m_db,
         "DELETE FROM rule_inputs WHERE rule_name = ?");
     del.bind(1, ruleName);
@@ -261,8 +306,6 @@ void StateDatabase::setRuleInputs(const std::string& ruleName,
         ins.exec();
         ins.reset();
     }
-
-    tx.commit();
 }
 
 std::vector<std::pair<std::string, Hash>> StateDatabase::getRuleInputs(
