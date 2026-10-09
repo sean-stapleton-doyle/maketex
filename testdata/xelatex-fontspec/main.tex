@@ -18,9 +18,10 @@
 \documentclass{article}
 \usepackage{fontspec}
 
-% Use a universally available font to keep the fixture portable.
-% Latin Modern is part of every TeX Live installation.
-\setmainfont{Latin Modern Roman}
+% Load Latin Modern by file name, not family name: a name lookup goes
+% through the OS font registry, which BasicTeX never populates, while a file
+% name is resolved by kpathsea inside the TeX tree on every installation.
+\setmainfont{lmroman10-regular.otf}
 
 \title{XeLaTeX Fontspec Test}
 \author{Test Fixture}

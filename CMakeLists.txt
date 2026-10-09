@@ -156,7 +156,9 @@ endif()
 if(MAKETEX_BUILD_TESTS)
     enable_testing()
 
-    file(GLOB_RECURSE TEST_SOURCES test/*.cpp)
+    # Unit tests: test/*.cpp only. test/integration/ runs real TeX engines
+    # and is a separate executable labeled `integration`.
+    file(GLOB TEST_SOURCES CONFIGURE_DEPENDS test/*.cpp)
     add_executable(maketex_tests ${TEST_SOURCES})
 
     target_link_libraries(maketex_tests PRIVATE
@@ -175,4 +177,26 @@ if(MAKETEX_BUILD_TESTS)
 
     include(GoogleTest)
     gtest_discover_tests(maketex_tests)
+
+    file(GLOB INTEGRATION_SOURCES CONFIGURE_DEPENDS test/integration/*.cpp)
+    add_executable(maketex_integration_tests ${INTEGRATION_SOURCES})
+    target_link_libraries(maketex_integration_tests PRIVATE
+        maketex
+        GTest::gtest_main
+    )
+    target_compile_definitions(maketex_integration_tests PRIVATE
+        MAKETEX_TESTDATA_DIR="${CMAKE_SOURCE_DIR}/testdata"
+    )
+    target_compile_options(maketex_integration_tests PRIVATE
+        -Wall
+        -Wextra
+        -Wpedantic
+        -Wshadow
+        -Wconversion
+    )
+    # Each case runs several real engine passes; allow for a slow TeX.
+    gtest_discover_tests(maketex_integration_tests
+        PROPERTIES LABELS integration TIMEOUT 300
+        DISCOVERY_TIMEOUT 30
+    )
 endif()
