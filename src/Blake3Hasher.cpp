@@ -61,4 +61,14 @@ std::expected<Hash, std::error_code> Blake3Hasher::hashFile(
     return result;
 }
 
+Hash Blake3Hasher::hashBytes(std::string_view bytes) const
+{
+    blake3_hasher ctx;
+    blake3_hasher_init(&ctx);
+    blake3_hasher_update(&ctx, bytes.data(), bytes.size());
+    Hash result { };
+    blake3_hasher_finalize(&ctx, result.data(), result.size());
+    return result;
+}
+
 } // namespace maketex

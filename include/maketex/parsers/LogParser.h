@@ -2,7 +2,9 @@
 
 #include <expected>
 #include <filesystem>
+#include <string>
 #include <system_error>
+#include <vector>
 
 namespace maketex {
 
@@ -10,11 +12,17 @@ namespace maketex {
 // Error/warning surfacing for the user is DiagnosticExtractor's job, parsed
 // from the captured stdout instead.
 //
-// Note: LaTeX wraps log lines at 79 characters by default. The patterns matched
-// here are short enough to fit on a single line; multi-line warning detection is
-// not implemented.
+// The engine runs with max_print_line=10000 (EngineBase), so each message
+// sits on one physical line and needs no unwrapping here.
 struct LogRecord {
-    bool rerunNeeded = false; // any "Rerun to get …" or "Please rerun LaTeX"
+    // A package or the kernel asked for another pass ("Rerun to get …",
+    // "Please rerun LaTeX", longtable's "Rerun LaTeX.", …).
+    bool rerunNeeded = false;
+    // Files LaTeX tried to read but did not find ("No file main.toc."), as
+    // written in the log — usually a bare name relative to the output or
+    // document directory. If one exists after the pass, the next pass reads
+    // it and its output can change.
+    std::vector<std::string> missingFiles;
 };
 
 class LogParser {

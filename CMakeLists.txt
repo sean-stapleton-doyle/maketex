@@ -71,7 +71,9 @@ add_library(maketex STATIC
     src/engines/PdfLatexEngine.cpp
     src/engines/XeLatexEngine.cpp
     src/engines/LuaLatexEngine.cpp
+    src/tools/BiberTool.cpp
     src/tools/BibtexTool.cpp
+    src/tools/InputLocator.cpp
     src/tools/HashTriggeredTool.cpp
     src/DiagnosticExtractor.cpp
     src/DiagnosticFormatter.cpp
@@ -80,6 +82,7 @@ add_library(maketex STATIC
     src/parsers/FlsParser.cpp
     src/parsers/LogParser.cpp
     src/parsers/AuxParser.cpp
+    src/parsers/BcfParser.cpp
     src/graph/FileNode.cpp
     src/graph/RuleNode.cpp
     src/graph/BuildGraph.cpp

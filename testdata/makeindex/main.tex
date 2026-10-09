@@ -4,7 +4,8 @@
 %
 % Expected maketex behaviour:
 %   - Engine: pdflatex
-%   - Passes: 2  (latex → makeindex → latex)
+%   - Passes: 3  (latex → makeindex → latex → latex: the printed index adds a
+%                 page, which changes \@abspage@last in the .aux)
 %   - Aux tools: makeindex
 %   - Output: main.pdf
 %

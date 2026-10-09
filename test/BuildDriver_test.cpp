@@ -5,11 +5,9 @@
 #include "maketex/IEngine.h"
 #include "maketex/ITool.h"
 #include "maketex/InvokerKind.h"
-#include "maketex/RunDecision.h"
 #include "maketex/RunResult.h"
 #include "maketex/StateDatabase.h"
 #include "maketex/ToolContext.h"
-#include "maketex/ToolFactory.h"
 #include "maketex/ToolInvocation.h"
 
 #include "test_utils.h"
@@ -26,7 +24,6 @@ using maketex::Blake3Hasher;
 using maketex::BuildDriver;
 using maketex::EngineInvocation;
 using maketex::InvokerKind;
-using maketex::RunDecision;
 using maketex::RunResult;
 using maketex::StateDatabase;
 using maketex::ToolContext;
@@ -36,28 +33,59 @@ namespace {
 
 // ── FakeTool ──────────────────────────────────────────────────────────────────
 
-// Minimal ITool fake. buildArgs returns `true` so the driver launches a no-op
-// process that exits 0; the test counts invocations via buildArgs.
+// File-driven ITool fake: applies when the engine pass wrote `trigger`
+// (an OUTPUT line in its .fls), depends on the trigger plus any extra
+// inputs, and when run writes outputContent to `output` through sh.
 class FakeTool : public maketex::ITool {
 public:
+    FakeTool(fs::path trigger, fs::path output, std::string outputContent = "out v1\n")
+        : m_trigger(std::move(trigger))
+        , m_output(std::move(output))
+        , m_outputContent(std::move(outputContent))
+    {
+    }
+
     std::string_view name() const override { return "fake-tool"; }
     maketex::InvokerKind invokerKind() const override { return InvokerKind::Bibtex; }
-    RunDecision decide(const ToolContext&) override
-    {
-        return m_hasRun ? RunDecision::Done : RunDecision::Run;
-    }
-    void onSuccess(const ToolContext&) override { m_hasRun = true; }
+
     std::vector<std::string> buildArgs(const ToolInvocation&) const override
     {
-        ++m_callCount;
-        return { "true" };
+        ++m_runCount;
+        if (m_fails)
+            return { "false" };
+        return { "sh", "-c", "printf '%s' \"$0\" > \"$1\"", m_outputContent,
+            m_output.string() };
     }
 
-    int callCount() const { return m_callCount; }
+    bool applies(const ToolContext& ctx) const override { return ctx.wrote(m_trigger); }
+
+    std::vector<maketex::ToolInput> inputs(const ToolContext&) const override
+    {
+        std::vector<maketex::ToolInput> inputs;
+        if (fs::exists(m_trigger))
+            inputs.push_back({ .path = m_trigger });
+        for (const auto& extra : m_extraInputs)
+            if (fs::exists(extra))
+                inputs.push_back({ .path = extra });
+        return inputs;
+    }
+
+    std::vector<fs::path> outputs(const ToolContext&) const override
+    {
+        return { m_output };
+    }
+
+    void addInput(fs::path path) { m_extraInputs.push_back(std::move(path)); }
+    void setFails(bool fails) { m_fails = fails; }
+    int runCount() const { return m_runCount; }
 
 private:
-    mutable int m_callCount = 0;
-    bool m_hasRun = false;
+    fs::path m_trigger;
+    fs::path m_output;
+    std::string m_outputContent;
+    std::vector<fs::path> m_extraInputs;
+    bool m_fails = false;
+    mutable int m_runCount = 0;
 };
 
 // ── FakeEngine ────────────────────────────────────────────────────────────────
@@ -130,6 +158,24 @@ protected:
             .texFile = m_dir / "main.tex",
             .outputDir = m_dir,
         };
+    }
+
+    // .fls content for a pass that read main.tex.
+    std::string flsWithTex() const
+    {
+        return "PWD " + m_dir.string() + "\nINPUT " + (m_dir / "main.tex").string() + "\n";
+    }
+
+    // A pass that reads main.tex and writes main.bcf with bcfContent — the
+    // trigger FakeTool keys on.
+    FakeCall triggerPass(const std::string& bcfContent) const
+    {
+        auto bcf = m_dir / "main.bcf";
+        return FakeCall { .writes = {
+                              { m_dir / "main.fls", flsWithTex() + "OUTPUT " + bcf.string() + "\n" },
+                              { m_dir / "main.log", "This is pdfTeX\n" },
+                              { bcf, bcfContent },
+                          } };
     }
 };
 
@@ -226,10 +272,12 @@ TEST_F(BuildDriverTest, changedGeneratedFileTrigersRerun)
         + "OUTPUT " + auxFile.string() + "\n";
 
     FakeEngine engine({
+        // Pass 1 creates the .aux; a newly written file is not by itself a
+        // change (the log asks for the rerun here).
         FakeCall {
             .writes = {
                 { m_dir / "main.fls", flsEntry },
-                { m_dir / "main.log", "" },
+                { m_dir / "main.log", "Rerun to get cross-references right\n" },
                 { auxFile, "\\relax\n" },
             },
         },
@@ -473,127 +521,291 @@ TEST_F(BuildDriverTest, ignoredPrefixFilesAreNotTracked)
     EXPECT_EQ(secondEngine.callCount(), 0);
 }
 
-TEST_F(BuildDriverTest, toolTriggerChangeDefeatsIncrementalSkip)
+// ── Tool scheduling ───────────────────────────────────────────────────────────
+
+TEST_F(BuildDriverTest, toolRunsOnceThenBuildConverges)
 {
-    // A .bcf-style trigger file changes between invocations; the engine's own
-    // inputs are untouched. The skip path must notice the tool is stale.
-    const fs::path texFile = m_dir / "main.tex";
-    const fs::path bcfFile = m_dir / "main.bcf";
-    auto flsEntry = "PWD " + m_dir.string() + "\n"
-        + "INPUT " + texFile.string() + "\n";
-    auto engineCall = [&] {
-        return FakeCall { .writes = {
-                              { m_dir / "main.fls", flsEntry },
-                              { m_dir / "main.log", "This is pdfTeX\n" },
-                          } };
-    };
-
-    maketex::ToolFactory factory(m_hasher);
-
-    // First session: engine writes the .bcf, tool fires, build converges and
-    // records the tool's input hash.
-    {
-        auto firstCall = engineCall();
-        firstCall.writes.emplace_back(bcfFile, "bcf v1\n");
-        FakeEngine engine({ firstCall, engineCall() });
-        auto biber = factory.hashTriggered(
-            "biber", ".bcf", { "true" }, InvokerKind::Biber, /*runOnce=*/true);
-        BuildDriver driver(engine, m_db, m_hasher, makeInv(),
-            { .tools = { biber.get() } });
-        ASSERT_TRUE(driver.run().success);
-    }
-
-    // Second session, nothing changed: tool's recorded input matches → skip.
-    {
-        FakeEngine engine({ });
-        auto biber = factory.hashTriggered(
-            "biber", ".bcf", { "true" }, InvokerKind::Biber, /*runOnce=*/true);
-        BuildDriver driver(engine, m_db, m_hasher, makeInv(),
-            { .tools = { biber.get() } });
-        auto res = driver.run();
-        EXPECT_TRUE(res.success);
-        EXPECT_EQ(res.passes, 0);
-    }
-
-    // Third session: the trigger file changed (e.g. the .bib edit propagated
-    // into the .bcf) — skip must fail and the tool must run again.
-    std::ofstream(bcfFile) << "bcf v2\n";
-    {
-        FakeEngine engine({ engineCall(), engineCall() });
-        auto biber = factory.hashTriggered(
-            "biber", ".bcf", { "true" }, InvokerKind::Biber, /*runOnce=*/true);
-        BuildDriver driver(engine, m_db, m_hasher, makeInv(),
-            { .tools = { biber.get() } });
-        auto res = driver.run();
-        EXPECT_TRUE(res.success);
-        EXPECT_GE(res.passes, 1);
-        EXPECT_GE(engine.callCount(), 1);
-    }
-}
-
-TEST_F(BuildDriverTest, hashTriggeredToolFiresOnBcfChange)
-{
-    // biber-style: HashTriggeredTool fires when the .bcf hash changes.
-    // FakeEngine writes a .bcf on pass 1; pass 2 converges (runOnce=true).
-    const fs::path bcfFile = m_dir / "main.bcf";
-
-    FakeEngine engine({
-        FakeCall {
-            .writes = {
-                { m_dir / "main.fls", "PWD " + m_dir.string() + "\n" },
-                { m_dir / "main.log", "This is pdfTeX\n" },
-                { bcfFile, "bcf content\n" },
-            },
-        },
-        FakeCall {
-            .writes = {
-                { m_dir / "main.fls", "PWD " + m_dir.string() + "\n" },
-                { m_dir / "main.log", "This is pdfTeX\n" },
-            },
-        },
-    });
-
-    maketex::ToolFactory factory(m_hasher);
-    auto biber = factory.hashTriggered(
-        "biber", ".bcf", { "true" }, InvokerKind::Biber, /*runOnce=*/true);
-    BuildDriver driver(engine, m_db, m_hasher, makeInv(),
-        { .tools = { biber.get() } });
+    // Pass 1 writes the trigger; the tool turns it into a .bbl the engine
+    // reads, so pass 2 runs. Pass 2 rewrites an identical trigger: the tool's
+    // inputs match its recorded run, so it does not run again.
+    FakeEngine engine({ triggerPass("bcf v1\n"), triggerPass("bcf v1\n") });
+    FakeTool tool(m_dir / "main.bcf", m_dir / "main.bbl");
+    BuildDriver driver(engine, m_db, m_hasher, makeInv(), { .tools = { &tool } });
     auto res = driver.run();
 
-    EXPECT_TRUE(res.success);
+    EXPECT_TRUE(res.success) << res.lastError;
+    EXPECT_EQ(res.passes, 2);
+    EXPECT_EQ(tool.runCount(), 1);
+}
+
+TEST_F(BuildDriverTest, toolNotRerunWhenOnlyTheSourceChanges)
+{
+    // A prose edit changes the .tex but not what the tool reads: the next
+    // invocation needs one engine pass and no tool run.
+    {
+        FakeEngine engine({ triggerPass("bcf v1\n"), triggerPass("bcf v1\n") });
+        FakeTool tool(m_dir / "main.bcf", m_dir / "main.bbl");
+        ASSERT_TRUE(BuildDriver(engine, m_db, m_hasher, makeInv(), { .tools = { &tool } })
+                .run()
+                .success);
+    }
+    std::ofstream(m_dir / "main.tex") << "\\documentclass{article}\\begin{document}More\\end{document}";
+
+    FakeEngine engine({ triggerPass("bcf v1\n") });
+    FakeTool tool(m_dir / "main.bcf", m_dir / "main.bbl");
+    auto res = BuildDriver(engine, m_db, m_hasher, makeInv(), { .tools = { &tool } }).run();
+
+    EXPECT_TRUE(res.success) << res.lastError;
+    EXPECT_EQ(res.passes, 1);
+    EXPECT_EQ(tool.runCount(), 0);
+}
+
+TEST_F(BuildDriverTest, toolOnlyInputChangeWithSameOutputNeedsNoEnginePass)
+{
+    // A comment-only .bib edit: the engine never reads the .bib, the tool
+    // reruns, and its .bbl comes out identical — no engine pass at all.
+    const fs::path bib = m_dir / "refs.bib";
+    std::ofstream(bib) << "@book{a, title={A}}\n";
+    {
+        FakeEngine engine({ triggerPass("bcf v1\n"), triggerPass("bcf v1\n") });
+        FakeTool tool(m_dir / "main.bcf", m_dir / "main.bbl");
+        tool.addInput(bib);
+        ASSERT_TRUE(BuildDriver(engine, m_db, m_hasher, makeInv(), { .tools = { &tool } })
+                .run()
+                .success);
+    }
+    std::ofstream(bib, std::ios::app) << "% a comment\n";
+
+    FakeEngine engine({ });
+    FakeTool tool(m_dir / "main.bcf", m_dir / "main.bbl");
+    tool.addInput(bib);
+    auto res = BuildDriver(engine, m_db, m_hasher, makeInv(), { .tools = { &tool } }).run();
+
+    EXPECT_TRUE(res.success) << res.lastError;
+    EXPECT_EQ(tool.runCount(), 1);
+    EXPECT_EQ(res.passes, 0);
+    EXPECT_EQ(engine.callCount(), 0);
+}
+
+TEST_F(BuildDriverTest, toolOnlyInputChangeWithNewOutputRunsEngine)
+{
+    const fs::path bib = m_dir / "refs.bib";
+    std::ofstream(bib) << "@book{a, title={A}}\n";
+    {
+        FakeEngine engine({ triggerPass("bcf v1\n"), triggerPass("bcf v1\n") });
+        FakeTool tool(m_dir / "main.bcf", m_dir / "main.bbl");
+        tool.addInput(bib);
+        ASSERT_TRUE(BuildDriver(engine, m_db, m_hasher, makeInv(), { .tools = { &tool } })
+                .run()
+                .success);
+    }
+    std::ofstream(bib, std::ios::app) << "@book{b, title={B}}\n";
+
+    FakeEngine engine({ triggerPass("bcf v1\n") });
+    FakeTool tool(m_dir / "main.bcf", m_dir / "main.bbl", "out v2\n");
+    tool.addInput(bib);
+    auto res = BuildDriver(engine, m_db, m_hasher, makeInv(), { .tools = { &tool } }).run();
+
+    EXPECT_TRUE(res.success) << res.lastError;
+    EXPECT_EQ(tool.runCount(), 1);
+    EXPECT_EQ(res.passes, 1);
+}
+
+TEST_F(BuildDriverTest, staleTriggerLeftOnDiskDoesNotFireTool)
+{
+    // A .bcf from an earlier version of the document (biblatex since
+    // removed) must not keep running the tool: the pass did not write it.
+    std::ofstream(m_dir / "main.bcf") << "left over\n";
+    FakeEngine engine({ FakeCall { .writes = {
+                                       { m_dir / "main.fls", flsWithTex() },
+                                       { m_dir / "main.log", "This is pdfTeX\n" },
+                                   } } });
+    FakeTool tool(m_dir / "main.bcf", m_dir / "main.bbl");
+    auto res = BuildDriver(engine, m_db, m_hasher, makeInv(), { .tools = { &tool } }).run();
+
+    EXPECT_TRUE(res.success) << res.lastError;
+    EXPECT_EQ(tool.runCount(), 0);
+    EXPECT_EQ(res.passes, 1);
+}
+
+TEST_F(BuildDriverTest, deletedToolOutputIsRegenerated)
+{
+    {
+        FakeEngine engine({ triggerPass("bcf v1\n"), triggerPass("bcf v1\n") });
+        FakeTool tool(m_dir / "main.bcf", m_dir / "main.bbl");
+        ASSERT_TRUE(BuildDriver(engine, m_db, m_hasher, makeInv(), { .tools = { &tool } })
+                .run()
+                .success);
+    }
+    fs::remove(m_dir / "main.bbl");
+
+    FakeEngine engine({ triggerPass("bcf v1\n") });
+    FakeTool tool(m_dir / "main.bcf", m_dir / "main.bbl");
+    auto res = BuildDriver(engine, m_db, m_hasher, makeInv(), { .tools = { &tool } }).run();
+
+    EXPECT_TRUE(res.success) << res.lastError;
+    EXPECT_EQ(tool.runCount(), 1);
+    EXPECT_TRUE(fs::exists(m_dir / "main.bbl"));
+}
+
+TEST_F(BuildDriverTest, toolFailureLeavesTheBuildStale)
+{
+    {
+        FakeEngine engine({ triggerPass("bcf v1\n") });
+        FakeTool tool(m_dir / "main.bcf", m_dir / "main.bbl");
+        tool.setFails(true);
+        auto res = BuildDriver(engine, m_db, m_hasher, makeInv(), { .tools = { &tool } }).run();
+        ASSERT_FALSE(res.success);
+        EXPECT_NE(res.lastError.find("fake-tool"), std::string::npos);
+    }
+
+    // Nothing changed on disk, but the last build failed: it must rebuild.
+    FakeEngine engine({ triggerPass("bcf v1\n"), triggerPass("bcf v1\n") });
+    FakeTool tool(m_dir / "main.bcf", m_dir / "main.bbl");
+    auto res = BuildDriver(engine, m_db, m_hasher, makeInv(), { .tools = { &tool } }).run();
+
+    EXPECT_TRUE(res.success) << res.lastError;
+    EXPECT_GE(engine.callCount(), 1);
+    EXPECT_EQ(tool.runCount(), 1);
+}
+
+// ── Convergence ───────────────────────────────────────────────────────────────
+
+TEST_F(BuildDriverTest, nonConvergedBuildIsNotUpToDateNextTime)
+{
+    auto rerunPass = [&] {
+        return FakeCall { .writes = {
+                              { m_dir / "main.fls", flsWithTex() },
+                              { m_dir / "main.log", "Rerun to get cross-references right\n" },
+                          } };
+    };
+    {
+        FakeEngine engine({ rerunPass() });
+        auto res = BuildDriver(engine, m_db, m_hasher, makeInv(), { .maxPasses = 1 }).run();
+        ASSERT_FALSE(res.success);
+    }
+
+    FakeEngine engine({ FakeCall { .writes = {
+                                       { m_dir / "main.fls", flsWithTex() },
+                                       { m_dir / "main.log", "This is pdfTeX\n" },
+                                   } } });
+    auto res = BuildDriver(engine, m_db, m_hasher, makeInv()).run();
+
+    EXPECT_TRUE(res.success) << res.lastError;
+    EXPECT_EQ(engine.callCount(), 1);
+}
+
+TEST_F(BuildDriverTest, newlyWrittenAuxAloneDoesNotForceSecondPass)
+{
+    // Every cold build logs "No file main.aux." and writes one; with no
+    // rerun request that is a one-pass build.
+    const fs::path aux = m_dir / "main.aux";
+    FakeEngine engine({ FakeCall { .writes = {
+                                       { m_dir / "main.fls",
+                                           flsWithTex() + "INPUT " + aux.string() + "\nOUTPUT "
+                                               + aux.string() + "\n" },
+                                       { m_dir / "main.log", "No file main.aux.\n" },
+                                       { aux, "\\relax\n" },
+                                   } } });
+    auto res = BuildDriver(engine, m_db, m_hasher, makeInv()).run();
+
+    EXPECT_TRUE(res.success) << res.lastError;
+    EXPECT_EQ(res.passes, 1);
+}
+
+TEST_F(BuildDriverTest, missingFileThatNowExistsForcesSecondPass)
+{
+    // \tableofcontents on a cold build: "No file main.toc." then the pass
+    // writes it — the next pass reads it.
+    const fs::path toc = m_dir / "main.toc";
+    FakeEngine engine({
+        FakeCall { .writes = {
+                       { m_dir / "main.fls", flsWithTex() + "OUTPUT " + toc.string() + "\n" },
+                       { m_dir / "main.log", "No file main.toc.\n" },
+                       { toc, "\\contentsline\n" },
+                   } },
+        FakeCall { .writes = {
+                       { m_dir / "main.fls", flsWithTex() + "INPUT " + toc.string() + "\nOUTPUT " + toc.string() + "\n" },
+                       { m_dir / "main.log", "This is pdfTeX\n" },
+                       { toc, "\\contentsline\n" },
+                   } },
+    });
+    auto res = BuildDriver(engine, m_db, m_hasher, makeInv()).run();
+
+    EXPECT_TRUE(res.success) << res.lastError;
     EXPECT_EQ(res.passes, 2);
 }
 
-TEST_F(BuildDriverTest, bibtexTriggeredByAuxBibdata)
+TEST_F(BuildDriverTest, writeOnlyOutputChangeDoesNotForceRerun)
 {
-    const fs::path auxFile = m_dir / "main.aux";
-    auto flsEntry = "PWD " + m_dir.string() + "\n"
-        + "INPUT " + auxFile.string() + "\n"
-        + "OUTPUT " + auxFile.string() + "\n";
-
+    // The engine writes .idx but never reads it back; its content changing
+    // between passes is makeindex's concern, not a reason for another pass.
+    const fs::path idx = m_dir / "main.idx";
+    auto fls = flsWithTex() + "OUTPUT " + idx.string() + "\n";
     FakeEngine engine({
-        FakeCall {
-            .writes = {
-                { m_dir / "main.fls", flsEntry },
-                { m_dir / "main.log", "" },
-                { auxFile, "\\bibdata{refs}\n\\citation{foo}\n" },
-            },
-        },
-        FakeCall {
-            .writes = {
-                { m_dir / "main.fls", flsEntry },
-                { m_dir / "main.log", "" },
-            },
-        },
+        FakeCall { .writes = {
+                       { m_dir / "main.fls", fls },
+                       { m_dir / "main.log", "Rerun to get cross-references right\n" },
+                       { idx, "\\indexentry{a}{1}\n" },
+                   } },
+        FakeCall { .writes = {
+                       { m_dir / "main.fls", fls },
+                       { m_dir / "main.log", "This is pdfTeX\n" },
+                       { idx, "\\indexentry{a}{2}\n" },
+                   } },
     });
+    auto res = BuildDriver(engine, m_db, m_hasher, makeInv()).run();
 
-    FakeTool bibtexTool;
-    BuildDriver driver(engine, m_db, m_hasher, makeInv(),
-        { .tools = { &bibtexTool } });
-    auto res = driver.run();
+    EXPECT_TRUE(res.success) << res.lastError;
+    EXPECT_EQ(res.passes, 2);
+}
 
-    EXPECT_TRUE(res.success);
-    EXPECT_EQ(bibtexTool.callCount(), 1);
+TEST_F(BuildDriverTest, sourceEditedDuringPassForcesAnotherPass)
+{
+    // The user saves main.tex while the engine runs: what was compiled is
+    // not what is on disk, so the build must not stop there.
+    FakeEngine engine({
+        FakeCall { .writes = {
+                       { m_dir / "main.fls", flsWithTex() },
+                       { m_dir / "main.log", "This is pdfTeX\n" },
+                       { m_dir / "main.tex", "\\documentclass{article}\\begin{document}Saved mid-build\\end{document}" },
+                   } },
+        FakeCall { .writes = {
+                       { m_dir / "main.fls", flsWithTex() },
+                       { m_dir / "main.log", "This is pdfTeX\n" },
+                   } },
+    });
+    auto res = BuildDriver(engine, m_db, m_hasher, makeInv()).run();
+
+    EXPECT_TRUE(res.success) << res.lastError;
+    EXPECT_EQ(res.passes, 2);
+}
+
+TEST_F(BuildDriverTest, scratchOutputDeletedByEngineDoesNotBlockSkip)
+{
+    // Packages like minted write and delete scratch files in the same run;
+    // the .fls lists them as outputs but they are never needed afterwards.
+    auto fls = flsWithTex() + "OUTPUT " + (m_dir / "main.pyg").string() + "\n";
+    {
+        FakeEngine engine({ FakeCall { .writes = {
+                                           { m_dir / "main.fls", fls },
+                                           { m_dir / "main.log", "This is pdfTeX\n" },
+                                       } } });
+        ASSERT_TRUE(BuildDriver(engine, m_db, m_hasher, makeInv()).run().success);
+    }
+    FakeEngine engine({ });
+    auto res = BuildDriver(engine, m_db, m_hasher, makeInv()).run();
+
+    EXPECT_TRUE(res.success) << res.lastError;
+    EXPECT_EQ(res.passes, 0);
+}
+
+TEST_F(BuildDriverTest, zeroMaxPassesIsAnError)
+{
+    FakeEngine engine({ });
+    auto res = BuildDriver(engine, m_db, m_hasher, makeInv(), { .maxPasses = 0 }).run();
+    EXPECT_FALSE(res.success);
+    EXPECT_FALSE(res.lastError.empty());
 }
 
 TEST_F(BuildDriverTest, observerReceivesPassEvents)
@@ -637,22 +849,9 @@ TEST_F(BuildDriverTest, observerReceivesToolEvents)
 {
     using maketex::BuildEvent;
 
-    FakeEngine engine({
-        FakeCall {
-            .writes = {
-                { m_dir / "main.fls", "PWD " + m_dir.string() + "\n" },
-                { m_dir / "main.log", "" },
-            },
-        },
-        FakeCall {
-            .writes = {
-                { m_dir / "main.fls", "PWD " + m_dir.string() + "\n" },
-                { m_dir / "main.log", "" },
-            },
-        },
-    });
+    FakeEngine engine({ triggerPass("bcf v1\n"), triggerPass("bcf v1\n") });
 
-    FakeTool tool;
+    FakeTool tool(m_dir / "main.bcf", m_dir / "main.bbl");
     std::vector<BuildEvent> events;
     BuildDriver driver(engine, m_db, m_hasher, makeInv(),
         { .tools = { &tool },

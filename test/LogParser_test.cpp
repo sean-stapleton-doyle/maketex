@@ -109,3 +109,33 @@ TEST_F(LogParserTest, missingFileReturnsError)
     ASSERT_FALSE(parsed.has_value());
     EXPECT_EQ(parsed.error(), std::errc::no_such_file_or_directory);
 }
+
+TEST_F(LogParserTest, longtableWidthsChanged_setsRerunNeeded)
+{
+    auto log = writeLog("main.log",
+        "Package longtable Warning: Table widths have changed. Rerun LaTeX.\n");
+    auto rec = LogParser { }.parse(log);
+    ASSERT_TRUE(rec.has_value());
+    EXPECT_TRUE(rec->rerunNeeded);
+}
+
+TEST_F(LogParserTest, biberRequestIsNotALatexRerun)
+{
+    // Tools are scheduled from their inputs; a request to run biber alone
+    // must not cost an engine pass.
+    auto log = writeLog("main.log",
+        "Package biblatex Warning: Please (re)run Biber on the file:\n(biblatex) main\n");
+    auto rec = LogParser { }.parse(log);
+    ASSERT_TRUE(rec.has_value());
+    EXPECT_FALSE(rec->rerunNeeded);
+}
+
+TEST_F(LogParserTest, collectsMissingFiles)
+{
+    auto log = writeLog("main.log", "No file main.aux.\n(./x.tex)\nNo file main.toc.\n");
+    auto rec = LogParser { }.parse(log);
+    ASSERT_TRUE(rec.has_value());
+    ASSERT_EQ(rec->missingFiles.size(), 2u);
+    EXPECT_EQ(rec->missingFiles[0], "main.aux");
+    EXPECT_EQ(rec->missingFiles[1], "main.toc");
+}

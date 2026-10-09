@@ -5,30 +5,24 @@
 namespace maketex {
 
 // Runs bibtex for classic BibTeX bibliography processing.
-// Input:  <outputDir>/<jobName>.aux (must contain \bibdata and \citation entries)
-//         .bib and .bst files found via TEXINPUTS
-// Output: <outputDir>/<jobName>.bbl, <outputDir>/<jobName>.blg
+// Applies when the .aux (or a child .aux from an \include) has \bibdata.
+// Inputs: the \citation/\bibdata/\bibstyle lines of the .aux tree (not the
+//         whole file — LaTeX rewrites that every pass), the .bib databases
+//         wherever bibtex will find them, and document-local .bst styles.
+// Output: <outputDir>/<jobName>.bbl
 class BibtexTool final : public ITool {
 public:
     std::string_view name() const override { return "bibtex"; }
     InvokerKind invokerKind() const override { return InvokerKind::Bibtex; }
-    RunDecision decide(const ToolContext& ctx) override;
-    void onSuccess(const ToolContext& ctx) override;
-
-    // The .aux file plus every \bibdata database resolvable next to the
-    // document or in the output directory. .bib files found only via
-    // TEXINPUTS elsewhere are not tracked — edits to those won't invalidate
-    // the incremental skip.
-    std::vector<std::filesystem::path> trackedInputs(
-        const ToolContext& ctx) const override;
 
     // argv: { "bibtex", "<jobName>" }
     // Runs from workingDir (= outputDir). TeX Live openout_any=p rejects
     // absolute paths for output files; bare job name avoids this.
     std::vector<std::string> buildArgs(const ToolInvocation& inv) const override;
 
-private:
-    bool m_hasRun = false;
+    bool applies(const ToolContext& ctx) const override;
+    std::vector<ToolInput> inputs(const ToolContext& ctx) const override;
+    std::vector<std::filesystem::path> outputs(const ToolContext& ctx) const override;
 };
 
 } // namespace maketex

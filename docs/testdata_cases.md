@@ -12,7 +12,7 @@ column tracks whether the fixture has been created on disk.
 | `toc` | pdflatex | 2 | — | Table of contents as a rerun trigger | Added |
 | `bibtex` | pdflatex | 3 | bibtex | Classic latex → bibtex → latex → latex | Added |
 | `biber` | pdflatex | 3 | biber | biblatex + biber; same pass structure, different tool | Added |
-| `makeindex` | pdflatex | 2 | makeindex | Index generation | Added |
+| `makeindex` | pdflatex | 3 | makeindex | Index generation; the index adds a page, so a third pass settles `\@abspage@last` | Added |
 | `glossaries` | pdflatex | 2 | makeglossaries | Glossary/acronym expansion | Added |
 | `input-include` | pdflatex | 1 | — | `\input` + `\include` across multiple files; dependency tracking | Added |
 | `graphics-raster` | pdflatex | 1 | — | `\includegraphics` with PNG/JPEG; image files tracked as deps | Added |

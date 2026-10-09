@@ -21,26 +21,10 @@ using maketex::IFileHasher;
 using maketex::StateDatabase;
 namespace fs = std::filesystem;
 
+using maketex::test_utils::makeMemoryDb;
+using maketex::test_utils::MockHasher;
+
 namespace {
-
-class MockHasher : public IFileHasher {
-public:
-    std::expected<Hash, std::error_code> hashFile(
-        const fs::path&, const std::optional<std::regex>&) const override
-    {
-        ++callCount;
-        return returnHash;
-    }
-
-    mutable int callCount = 0;
-    Hash returnHash { };
-};
-
-std::unique_ptr<SQLite::Database> makeMemoryDb()
-{
-    return std::make_unique<SQLite::Database>(
-        ":memory:", SQLite::OPEN_READWRITE | SQLite::OPEN_CREATE);
-}
 
 class FileNodeTest : public ::testing::Test {
 protected:

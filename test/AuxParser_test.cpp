@@ -92,3 +92,50 @@ TEST_F(AuxParserTest, missingFileReturnsError)
     ASSERT_FALSE(parsed.has_value());
     EXPECT_EQ(parsed.error(), std::errc::no_such_file_or_directory);
 }
+
+TEST_F(AuxParserTest, followsIncludedChildAux)
+{
+    // \include{chap} puts the chapter's \bibdata in chap.aux, reached only
+    // through \@input in the main .aux.
+    fs::create_directories(m_dir / "chapters");
+    writeAux("chapters/chap.aux", "\\relax\n\\citation{knuth}\n\\bibdata{refs}\n");
+    auto aux = writeAux("main.aux", "\\relax\n\\@input{chapters/chap.aux}\n\\bibstyle{plain}\n");
+
+    auto rec = AuxParser { }.parse(aux);
+    ASSERT_TRUE(rec.has_value());
+    ASSERT_EQ(rec->bibDataFiles.size(), 1u);
+    EXPECT_EQ(rec->bibDataFiles[0], "refs");
+    ASSERT_EQ(rec->bibStyles.size(), 1u);
+    EXPECT_EQ(rec->bibStyles[0], "plain");
+    // Document order: the child's lines come where it is \@input.
+    EXPECT_EQ(rec->bibtexSignature, "\\citation{knuth}\n\\bibdata{refs}\n\\bibstyle{plain}\n");
+}
+
+TEST_F(AuxParserTest, missingChildAuxIsSkipped)
+{
+    auto aux = writeAux("main.aux", "\\@input{absent.aux}\n\\bibdata{refs}\n");
+    auto rec = AuxParser { }.parse(aux);
+    ASSERT_TRUE(rec.has_value());
+    EXPECT_EQ(rec->bibDataFiles.size(), 1u);
+}
+
+TEST_F(AuxParserTest, inputCycleTerminates)
+{
+    writeAux("a.aux", "\\@input{main.aux}\n\\citation{x}\n");
+    auto aux = writeAux("main.aux", "\\@input{a.aux}\n");
+    auto rec = AuxParser { }.parse(aux);
+    ASSERT_TRUE(rec.has_value());
+    EXPECT_EQ(rec->bibtexSignature, "\\citation{x}\n");
+}
+
+TEST_F(AuxParserTest, signatureIgnoresLabelsAndPageNumbers)
+{
+    // What changes between passes (labels, page counts) must not change the
+    // bibtex signature, or bibtex would rerun on every pass.
+    auto first = writeAux("one.aux",
+        "\\relax\n\\citation{k}\n\\newlabel{s}{{1}{1}}\n\\bibdata{refs}\n\\gdef \\@abspage@last{1}\n");
+    auto second = writeAux("two.aux",
+        "\\relax\n\\citation{k}\n\\newlabel{s}{{1}{2}}\n\\bibdata{refs}\n\\bibcite{k}{1}\n\\gdef \\@abspage@last{2}\n");
+    EXPECT_EQ(AuxParser { }.parse(first)->bibtexSignature,
+        AuxParser { }.parse(second)->bibtexSignature);
+}

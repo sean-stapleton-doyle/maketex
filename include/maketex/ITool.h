@@ -1,27 +1,35 @@
 #pragma once
 
 #include "maketex/InvokerKind.h"
-#include "maketex/RunDecision.h"
 #include "maketex/ToolContext.h"
 #include "maketex/ToolInvocation.h"
 
 #include <filesystem>
+#include <optional>
 #include <string>
 #include <string_view>
 #include <vector>
 
 namespace maketex {
 
-// Note: decide() is non-const because tools may stash scheduling state
-// computed during the check (e.g. a freshly-hashed trigger file) for
-// onSuccess() to commit. Pure decision logic still reads through const refs.
+// One thing an auxiliary tool's result depends on.
+struct ToolInput {
+    // Absolute path of the file. For a derived input (content set) this is
+    // a virtual key such as "<out>/main.aux#bibtex": it names the part of a
+    // file the content was taken from and is never opened.
+    std::filesystem::path path;
+    // Set for a derived input: the bytes whose digest stands in for the
+    // file's. Unset means "hash the file at path".
+    std::optional<std::string> content;
+};
 
 // Auxiliary LaTeX tools (biber, bibtex, makeindex, etc.).
 //
-// Tools are pure descriptions of how/when to invoke an external program;
-// execution is performed by BuildDriver via launchProcess(). Adding a new
-// tool means: subclass ITool, implement the hooks, register it with
-// BuildDriver.
+// Tools are pure descriptions: whether the document uses them, what their
+// result depends on, and how to invoke them. BuildDriver owns scheduling —
+// it runs a tool when it applies and its inputs differ from the ones its
+// last successful run consumed (recorded in the state database), so the
+// same rule decides within a build and across invocations.
 class ITool {
 public:
     virtual ~ITool() = default;
@@ -36,24 +44,20 @@ public:
     // Returns the full argv. argv[0] is looked up via PATH.
     virtual std::vector<std::string> buildArgs(const ToolInvocation& inv) const = 0;
 
-    // Returns how this tool should be handled this pass given post-pass context.
-    virtual RunDecision decide(const ToolContext& ctx) = 0;
+    // Whether the document uses this tool, judged from the latest engine
+    // pass — e.g. biber applies when that pass wrote the .bcf. Deciding from
+    // the pass rather than from files on disk keeps a stale .bcf left over
+    // from an earlier version of the document from firing biber forever.
+    virtual bool applies(const ToolContext& ctx) const = 0;
 
-    // Called by BuildDriver after a successful run(). Tools that maintain
-    // state across passes (e.g. "ran once already") update it here.
-    virtual void onSuccess(const ToolContext& /*ctx*/) { }
+    // Everything the tool's result depends on: trigger files, databases,
+    // styles, derived digests. Inputs that do not exist are omitted.
+    virtual std::vector<ToolInput> inputs(const ToolContext& ctx) const = 0;
 
-    // Files whose content determines whether this tool's output is current
-    // (trigger files, .bib databases, …). BuildDriver persists their hashes
-    // after a successful build and re-checks them on the next invocation's
-    // incremental-skip path. Only existing files should be returned.
-    // Default: no tracked inputs — the tool is re-run whenever decide() says
-    // Run on a fresh invocation.
-    virtual std::vector<std::filesystem::path> trackedInputs(
-        const ToolContext& /*ctx*/) const
-    {
-        return { };
-    }
+    // Files the tool writes that the engine reads back (.bbl, .ind). After a
+    // run, the engine reruns only if one of them changed. Empty means
+    // unknown: every run is assumed to change the document.
+    virtual std::vector<std::filesystem::path> outputs(const ToolContext& ctx) const = 0;
 };
 
 } // namespace maketex
