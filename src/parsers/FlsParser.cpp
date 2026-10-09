@@ -78,4 +78,14 @@ bool FlsParser::isIgnored(const fs::path& p) const
     });
 }
 
+FlsParser projectFlsParser(const fs::path& projectDir,
+    const std::vector<fs::path>& ignorePrefixes)
+{
+    FlsParser parser;
+    parser.overridePwd(projectDir);
+    for (const auto& prefix : ignorePrefixes)
+        parser.addIgnorePrefix(prefix);
+    return parser;
+}
+
 } // namespace maketex

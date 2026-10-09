@@ -162,5 +162,8 @@ when nothing has changed on disk, avoiding rehashing unchanged files.
 | `BuildGraph` owns nodes via `unique_ptr` | Single ownership; `RuleNode` holds non-owning `FileNode*` |
 | `StateDatabase` takes `unique_ptr<SQLite::Database>` | Allows in-memory db in tests without a separate interface |
 | `posix_spawn` + `poll(2)` | Avoids `fork()` overhead and SIGPIPE hazards; captures stdout/stderr without threads |
+| Children get `/dev/null` stdin, a timeout, and a stop token | TeX never waits on a terminal; a wedged tool is killed (SIGTERM, then SIGKILL); watch mode's quit interrupts a running pass |
+| A missing program is a `RunResult`, not an exception | "biber is not installed" surfaces as a `missing-tool` diagnostic with an install hint instead of aborting the build |
+| One flock per document per output directory | A watch session and a manual build of the same document take turns instead of interleaving writes |
 | Synchronous execution | Engine and tool runs block the build thread; parallelism, if added, should come from the dependency graph |
 | `-interaction=nonstopmode` not batchmode | Errors and warnings appear on stdout for in-memory parsing; batchmode would require disk reads of the `.log` file |

@@ -1,6 +1,5 @@
 +++
 title = 'Using maketex'
-date = '2026-06-11T00:00:00Z'
 +++
 
 # Using maketex
@@ -16,9 +15,18 @@ maketex clean  [file.tex] [options]     # remove generated files
 maketex --help | --version
 ```
 
-The `build` keyword is optional: `maketex thesis.tex` works. With a
-[`maketex.toml`](configuration/) declaring `main`, plain `maketex` with no
-arguments builds the configured document.
+The `build` keyword is optional, and so is the file: in a directory with
+one document, plain `maketex` builds it. maketex picks the document in this
+order:
+
+1. The file you pass (`maketex thesis` works too; `.tex` is optional).
+2. `main` in [`maketex.toml`](configuration/).
+3. The `.tex` file in the current directory that starts with
+   `\documentclass`. If there are several, `main.tex` or the one named after
+   the directory wins; otherwise maketex lists them and asks you to choose.
+
+If the chosen file has a `% !TEX root = ../thesis.tex` comment (as editors
+write in chapter files), maketex builds that root document instead.
 
 ## Building
 
@@ -31,7 +39,8 @@ By default everything the build produces — aux files, logs, the `.fls`
 recorder output, and the `.maketex.db` state database — goes into a hidden
 `.maketex/` directory next to the document, and the finished PDF (plus
 `.synctex.gz` when enabled) is copied back beside the `.tex` file. Your
-source tree stays clean; add `.maketex/` to `.gitignore`. An explicit
+source tree stays clean, and maketex writes a `.gitignore` inside
+`.maketex/` so you don't have to. An explicit
 `--output-dir` (or the `output-dir` config key) overrides this and keeps
 everything, including the PDF, inside the directory you chose.
 
@@ -54,25 +63,68 @@ written by an incompatible maketex version or under different build options
 upgrading after this change therefore triggers one full rebuild, and old
 aux files strewn next to your sources are swept up by `maketex clean`.
 
+### Choosing the engine
+
+Unless you set one, maketex picks the engine from the document:
+
+1. A `% !TeX program = xelatex` comment in the first lines.
+2. The packages the preamble loads: Lua-only packages (`luacode`,
+   `luatexbase`, …) or `\directlua` select `lualatex`; XeTeX-only packages
+   (`xeCJK`, `mathspec`, …) select `xelatex`; `fontspec`, `unicode-math`, and
+   `polyglossia` select `lualatex`.
+3. Otherwise, `pdflatex`.
+
+If a package hidden in a custom class needs a Unicode engine, pdflatex fails
+with a message saying so, and maketex rebuilds once with the engine that the
+message names. The report says which engine ran and why:
+`lualatex (loads fontspec)`.
+
+### Auxiliary tools
+
 Auxiliary tools run automatically between engine passes when their inputs
 change — the default roster is biber, makeindex, makeglossaries, pythontex,
-and bibtex, in that order. Trim or reorder it with `--tools biber,makeindex`
-or the `tools` config key.
+and bibtex, in that order. A tool runs only when the latest pass used it
+(for example, wrote a `.bcf`) and its inputs differ from its last run: a
+prose edit reruns no tools, and editing only a `.bib` comment reruns bibtex
+but no engine pass. Trim or reorder the roster with
+`--tools biber,makeindex` or the `tools` config key.
+
+### Missing packages and programs
+
+When a package or tool isn't installed, maketex reports one error at the
+`\usepackage` line that loads it and suggests the install command for your
+TeX distribution:
+
+```
+error: main.tex:19: File `minted.sty' not found
+    19 | \usepackage{minted}
+  hint: install it: sudo tlmgr install minted
+```
+
+On TeX Live (including MacTeX and BasicTeX), maketex asks
+`tlmgr search` which package provides an unfamiliar file and caches the
+answer in `~/.cache/maketex/`. Debian, Fedora, and MiKTeX installs get
+`apt`, `dnf`, and `miktex` commands instead.
+
+Documents that run external programs (minted, svg) need `--shell-escape`.
+maketex never turns it on by itself, because it lets the document run
+arbitrary commands; the error tells you to add the flag.
 
 ### Build options
 
 | Flag | Effect |
 |---|---|
-| `--engine <name>` | `pdflatex` (default), `xelatex`, or `lualatex` |
+| `--engine <name>` | `pdflatex`, `xelatex`, or `lualatex`; detected from the document when unset |
 | `--engine-program <bin>` | spawn this executable instead of the engine's default binary |
 | `--engine-opt <opt>` | pass an option through to the engine verbatim (repeatable) |
 | `--tools a,b,c` | auxiliary tool roster, replacing the default |
 | `-o`, `--output-dir <dir>` | where outputs and `.maketex.db` go (created if missing); default `.maketex/` next to the document, with the PDF published back |
 | `--format <fmt>` | report format: `human` (default), `json`, or `github` (build only) |
-| `--shell-escape` | enable `\write18` |
-| `--synctex` | generate SyncTeX data |
-| `--no-halt-on-error` | keep compiling past TeX errors |
+| `--shell-escape` / `--no-shell-escape` | enable `\write18` (default off) |
+| `--synctex` / `--no-synctex` | generate SyncTeX data (default on) |
+| `--halt-on-error` / `--no-halt-on-error` | stop at the first TeX error (default on) |
 | `--max-passes <n>` | give up if not converged after n passes (default 8) |
+| `--timeout <seconds>` | stop any engine or tool run that takes longer (default: no limit) |
 | `-v`, `--verbose` | show raw log context under each diagnostic |
 | `--plain` | plain text output even on a terminal |
 | `--config <path>` / `--no-config` | use exactly this config file / ignore config files |
@@ -97,9 +149,17 @@ Two machine formats are available on `build` (see [ci.md](ci/)):
   (`::error file=…,line=…::…`), which surface as inline annotations on
   pull requests.
 
-Exit codes: `0` success, `1` build failure or runtime error (engine missing,
-database trouble), `2` configuration error (bad engine name, missing input
-file). Malformed command lines exit non-zero with CLI11's own codes.
+Exit codes:
+
+| Code | Meaning |
+|---|---|
+| `0` | success (also `--help` and `--version`) |
+| `1` | the document did not build (TeX or tool errors, no convergence) |
+| `2` | usage error: bad flag, invalid config, input file not found |
+| `3` | environment error: engine or tool not installed, database or file system trouble |
+
+With `--format=json`, stdout always carries exactly one JSON document, even
+for exit code 3.
 
 ## Watching
 
@@ -117,7 +177,7 @@ On a terminal this opens a full-screen interface showing live status
 
 | Key | Action |
 |---|---|
-| `q` / `Ctrl-C` | quit (an in-flight engine pass finishes first) |
+| `q` / `Ctrl-C` | quit (a running engine pass or tool is stopped) |
 | `r` | force a rebuild now |
 | `v` | toggle raw log context on diagnostics |
 
@@ -149,7 +209,8 @@ outside the output directory only the published PDF/SyncTeX and a legacy
 ## Configuration
 
 Per-project defaults live in `maketex.toml`, discovered by walking up from
-the document's directory. Flags always win over config values. See
+the document's directory to the repository root. Every boolean flag has a
+`--no-` form, so flags always win over config values. See
 [configuration.md](configuration/) for the full schema.
 
 ```toml

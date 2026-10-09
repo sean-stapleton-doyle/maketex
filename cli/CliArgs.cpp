@@ -1,5 +1,7 @@
 #include "CliArgs.h"
 
+#include "maketex/Build.h"
+
 #include <CLI/CLI.hpp>
 
 #include <algorithm>
@@ -99,7 +101,7 @@ namespace {
 ParseResult parseCliArgs(const std::vector<std::string>& args)
 {
     CLI::App app { "maketex — a modern latexmk replacement", "maketex" };
-    app.set_version_flag("--version", MAKETEX_VERSION);
+    app.set_version_flag("--version", std::string(maketex::version()));
     app.require_subcommand(1);
 
     CliArgs out;

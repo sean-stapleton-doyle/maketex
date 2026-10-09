@@ -9,6 +9,7 @@
 #include "maketex/ToolFactory.h"
 #include "maketex/engines/EngineFactory.h"
 #include "maketex/parsers/FlsParser.h"
+#include "maketex/tools/InputLocator.h"
 
 #include <SQLiteCpp/SQLiteCpp.h>
 
@@ -31,6 +32,11 @@
 namespace fs = std::filesystem;
 
 namespace maketex {
+
+std::string_view version()
+{
+    return MAKETEX_VERSION;
+}
 
 std::vector<fs::path> texSystemRoots()
 {
@@ -138,6 +144,14 @@ namespace {
         fp += options.synctex ? '1' : '0';
         fp += ";haltOnError=";
         fp += options.haltOnError ? '1' : '0';
+        // Where the engine and tools look for inputs changes what they
+        // produce as surely as a flag does.
+        for (const auto& [var, value] : toolSearchEnv(options.texFile.parent_path())) {
+            fp += ';';
+            fp += var;
+            fp += '=';
+            fp += value;
+        }
         return fp;
     }
 
@@ -320,6 +334,15 @@ std::string jobNameFor(const BuildOptions& options)
     return splitJobName(options.engineArguments).second.value_or(options.texFile.stem().string());
 }
 
+std::vector<fs::path> publishedArtifactPaths(const BuildOptions& options)
+{
+    if (!options.usesDefaultOutputDir())
+        return { };
+    auto texDir = options.texFile.parent_path();
+    auto job = jobNameFor(options);
+    return { texDir / (job + ".pdf"), texDir / (job + ".synctex.gz") };
+}
+
 fs::path buildLockPath(const fs::path& outDir, const std::string& jobName)
 {
     return outDir / ("." + jobName + ".lock");
@@ -438,13 +461,7 @@ std::optional<BuildFileSets> scanBuildFiles(const BuildOptions& options)
     };
     fs::path flsPath = inv.jobFile(".fls");
 
-    FlsParser parser;
-    // Re-root recorded paths in case the project moved since the last build
-    // (see BuildDriver::updateGraphFromFls).
-    parser.overridePwd(options.texFile.parent_path());
-    for (const auto& root : texSystemRoots())
-        parser.addIgnorePrefix(root);
-    auto record = parser.parse(flsPath);
+    auto record = projectFlsParser(options.texFile.parent_path(), texSystemRoots()).parse(flsPath);
     if (!record)
         return std::nullopt;
 

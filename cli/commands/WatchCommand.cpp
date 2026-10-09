@@ -1,6 +1,7 @@
 #include "commands/WatchCommand.h"
 
 #include "PackageHints.h"
+#include "PathUtil.h"
 
 #include "FileWatcher.h"
 #include "render/InlineReport.h"
@@ -99,17 +100,12 @@ namespace {
             // Applied by the watcher after it expands directories, since
             // watch-extra-paths may name one that contains them.
             const auto outDir = fs::weakly_canonical(build.resolvedOutputDir());
-            const auto texDir = fs::weakly_canonical(build.texFile.parent_path());
-            const std::string jobName = jobNameFor(build);
-            const bool published = build.usesDefaultOutputDir();
+            std::vector<fs::path> published;
+            for (const auto& p : publishedArtifactPaths(build))
+                published.push_back(fs::weakly_canonical(p));
             watcher.setWatchSet(watchSet, [=](const fs::path& p) {
-                auto canonical = fs::weakly_canonical(p);
-                auto rel = canonical.lexically_relative(outDir);
-                if (!rel.empty() && *rel.begin() != "..")
-                    return true;
-                return published
-                    && (canonical == texDir / (jobName + ".pdf")
-                        || canonical == texDir / (jobName + ".synctex.gz"));
+                return isInside(p, outDir)
+                    || std::ranges::contains(published, fs::weakly_canonical(p));
             });
 
             callbacks.onResult(std::move(result), duration, watchSet.size());
@@ -142,9 +138,7 @@ namespace {
                             options.extras.verbose ? diagnostics::Verbosity::Verbose
                                                    : diagnostics::Verbosity::Normal);
                         if (result.success)
-                            std::cout << "maketex: done in " << result.passes
-                                      << " pass"
-                                      << (result.passes == 1 ? "" : "es") << "\n";
+                            std::cout << "maketex: done in " << passCount(result.passes) << "\n";
                         else
                             std::cerr << "maketex: failed: " << result.lastError
                                       << "\n";

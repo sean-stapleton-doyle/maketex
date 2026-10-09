@@ -1,5 +1,7 @@
 #include "render/InlineReport.h"
 
+#include "PathUtil.h"
+
 #include "render/SourceSnippet.h"
 
 #include <ftxui/dom/node.hpp>
@@ -106,8 +108,7 @@ Element buildReport(const BuildResult& result, const BuildOptions& options,
     for (const auto& diagnostic : result.diagnostics)
         rows.push_back(diagnosticRow(diagnostic, verbose));
 
-    std::string passes = std::format("{} pass{}", result.passes,
-        result.passes == 1 ? "" : "es");
+    std::string passes = passCount(result.passes);
     if (result.upToDate) {
         rows.push_back(hbox(text("✓ ") | color(Color::Green) | bold,
             text("up to date") | color(Color::Green)));

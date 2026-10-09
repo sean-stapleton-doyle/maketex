@@ -24,6 +24,10 @@ public:
     void addInput(FileNode* node);
     void addOutput(FileNode* node);
 
+    // Forgets every input and output edge — before re-wiring the rule from
+    // a fresh record of what it read, so a dropped dependency goes away.
+    void clearEdges();
+
     const std::vector<FileNode*>& inputs() const { return m_inputs; }
     const std::vector<FileNode*>& outputs() const { return m_outputs; }
 
