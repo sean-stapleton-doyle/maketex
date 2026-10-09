@@ -3,6 +3,7 @@
 #include <filesystem>
 #include <optional>
 #include <string>
+#include <string_view>
 
 namespace maketex {
 
@@ -19,6 +20,15 @@ struct EngineInvocation {
     std::string resolvedJobName() const
     {
         return jobName.value_or(texFile.stem().string());
+    }
+
+    // <outputDir>/<job><extension>: where the engine and tools put the
+    // job's .aux, .log, .bbl, … files.
+    std::filesystem::path jobFile(std::string_view extension) const
+    {
+        auto name = resolvedJobName();
+        name += extension;
+        return outputDir / name;
     }
 };
 

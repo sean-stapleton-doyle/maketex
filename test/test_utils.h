@@ -38,8 +38,10 @@ public:
         return returnHash;
     }
 
+    Hash hashBytes(std::string_view) const override { return returnHash; }
+
     mutable int callCount = 0;
-    Hash returnHash {};
+    Hash returnHash { };
 };
 
 // A temp path unique to the running test: ctest runs every discovered test

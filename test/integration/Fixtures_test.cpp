@@ -8,6 +8,7 @@
 
 #include <algorithm>
 #include <filesystem>
+#include <initializer_list>
 #include <ostream>
 #include <string>
 #include <vector>
@@ -24,6 +25,7 @@ struct FixtureCase {
     std::vector<std::string> programs; // besides the engine
     std::vector<std::string> texFiles; // packages the document loads
     std::vector<std::string> tools; // tools expected on a cold build
+    int coldPasses = 1; // engine passes for a cold build (fixture header)
     bool shellEscape = false;
     // Non-empty while a tracked maketex bug breaks this case; the case is
     // skipped with this text so it stays visible in every test run.
@@ -48,30 +50,40 @@ std::string engineProgram(EngineKind kind)
 
 const std::vector<FixtureCase> kCases = {
     { .name = "pdflatex-simple" },
-    { .name = "cross-references" },
-    { .name = "toc" },
+    { .name = "cross-references", .coldPasses = 2 },
+    { .name = "toc", .coldPasses = 2 },
     { .name = "input-include",
+        .coldPasses = 2,
         .knownIssue = "\\include{chapters/x} needs outDir/chapters/ (plan #16)" },
     { .name = "graphics-raster", .texFiles = { "graphicx.sty" } },
     { .name = "graphics-eps", .texFiles = { "epstopdf.sty" } },
     { .name = "pgfplots", .texFiles = { "pgfplots.sty" } },
-    { .name = "bibtex", .programs = { "bibtex" }, .tools = { "bibtex" } },
+    { .name = "bibtex",
+        .programs = { "bibtex" },
+        .tools = { "bibtex" },
+        .coldPasses = 3 },
     { .name = "biber",
         .programs = { "biber" },
         .texFiles = { "biblatex.sty" },
-        .tools = { "biber" } },
+        .tools = { "biber" },
+        .coldPasses = 3 },
     { .name = "makeindex",
         .programs = { "makeindex" },
         .texFiles = { "makeidx.sty" },
-        .tools = { "makeindex" } },
+        .tools = { "makeindex" },
+        // The index adds a page, so pass 2 rewrites \@abspage@last in the
+        // .aux and a third pass is needed for "page X of Y" to be right.
+        .coldPasses = 3 },
     { .name = "glossaries",
         .programs = { "makeglossaries" },
         .texFiles = { "glossaries.sty" },
-        .tools = { "makeglossaries" } },
+        .tools = { "makeglossaries" },
+        .coldPasses = 2 },
     { .name = "pythontex",
         .programs = { "pythontex" },
         .texFiles = { "pythontex.sty" },
-        .tools = { "pythontex" } },
+        .tools = { "pythontex" },
+        .coldPasses = 2 },
     { .name = "minted",
         .programs = { "pygmentize" },
         .texFiles = { "minted.sty" },
@@ -123,7 +135,7 @@ TEST_P(FixtureTest, coldBuildSucceedsThenIsUpToDate)
 
     auto cold = fixture.build(optionsFor(fixture));
     ASSERT_TRUE(cold.result.success) << cold.result.lastError;
-    EXPECT_GE(cold.result.passes, 1);
+    EXPECT_EQ(cold.result.passes, GetParam().coldPasses);
     EXPECT_TRUE(fs::exists(fixture.path("main.pdf")))
         << "PDF not published beside main.tex";
     for (const auto& tool : GetParam().tools)
@@ -135,6 +147,130 @@ TEST_P(FixtureTest, coldBuildSucceedsThenIsUpToDate)
     EXPECT_TRUE(warm.upToDate);
     EXPECT_EQ(warm.result.passes, 0);
     EXPECT_TRUE(warm.toolsRun.empty());
+}
+
+// ── Incremental rebuilds ─────────────────────────────────────────────────────
+// Scenarios a latexmk user hits every day; each pins the number of engine
+// passes and tool runs so a regression in scheduling shows up as a number.
+
+class IncrementalTest : public ::testing::Test {
+protected:
+    void requirePrograms(std::initializer_list<const char*> programs)
+    {
+        for (const char* p : programs)
+            if (!hasProgram(p))
+                GTEST_SKIP() << "not installed: " << p;
+    }
+
+    static bool ran(const BuildRun& run, const std::string& tool)
+    {
+        return std::ranges::find(run.toolsRun, tool) != run.toolsRun.end();
+    }
+};
+
+TEST_F(IncrementalTest, proseEditInBibtexDocumentIsOnePassWithoutBibtex)
+{
+    requirePrograms({ "pdflatex", "bibtex" });
+    FixtureCopy fixture("bibtex");
+    ASSERT_TRUE(fixture.build().result.success);
+
+    fixture.replace("main.tex", "\\end{document}", "One more sentence.\n\\end{document}");
+    auto run = fixture.build();
+
+    ASSERT_TRUE(run.result.success) << run.result.lastError;
+    EXPECT_EQ(run.result.passes, 1);
+    EXPECT_FALSE(ran(run, "bibtex"));
+}
+
+TEST_F(IncrementalTest, bibCommentEditRerunsBibtexButNotLatex)
+{
+    requirePrograms({ "pdflatex", "bibtex" });
+    FixtureCopy fixture("bibtex");
+    ASSERT_TRUE(fixture.build().result.success);
+
+    fixture.append("refs.bib", "\n% a comment bibtex ignores\n");
+    auto run = fixture.build();
+
+    ASSERT_TRUE(run.result.success) << run.result.lastError;
+    EXPECT_TRUE(ran(run, "bibtex"));
+    EXPECT_EQ(run.result.passes, 0);
+}
+
+TEST_F(IncrementalTest, bibEntryEditRebuildsBibliography)
+{
+    requirePrograms({ "pdflatex", "bibtex" });
+    FixtureCopy fixture("bibtex");
+    ASSERT_TRUE(fixture.build().result.success);
+    auto bblBefore = fixture.path(".maketex/main.bbl");
+    ASSERT_TRUE(fs::exists(bblBefore));
+
+    fixture.replace("refs.bib", "Literate Programming", "Literate Programming, Revisited");
+    auto run = fixture.build();
+
+    ASSERT_TRUE(run.result.success) << run.result.lastError;
+    EXPECT_TRUE(ran(run, "bibtex"));
+    EXPECT_GE(run.result.passes, 1);
+    EXPECT_LE(run.result.passes, 2);
+}
+
+TEST_F(IncrementalTest, proseEditInIndexedDocumentIsOnePassWithoutMakeindex)
+{
+    requirePrograms({ "pdflatex", "makeindex" });
+    FixtureCopy fixture("makeindex");
+    ASSERT_TRUE(fixture.build().result.success);
+
+    fixture.replace("main.tex", "\\printindex", "One more sentence.\n\n\\printindex");
+    auto run = fixture.build();
+
+    ASSERT_TRUE(run.result.success) << run.result.lastError;
+    EXPECT_EQ(run.result.passes, 1);
+    EXPECT_FALSE(ran(run, "makeindex"));
+}
+
+TEST_F(IncrementalTest, bibliographyInIncludedFileRunsBibtex)
+{
+    requirePrograms({ "pdflatex", "bibtex" });
+    FixtureCopy fixture("bibtex");
+    fixture.write("main.tex",
+        "\\documentclass{article}\n\\begin{document}\n\\include{chap}\n\\end{document}\n");
+    fixture.write("chap.tex",
+        "See \\cite{knuth1984literate}.\n\\bibliographystyle{plain}\n\\bibliography{refs}\n");
+    auto run = fixture.build();
+
+    ASSERT_TRUE(run.result.success) << run.result.lastError;
+    EXPECT_TRUE(ran(run, "bibtex"));
+    EXPECT_TRUE(fs::exists(fixture.path(".maketex/main.bbl")));
+}
+
+TEST_F(IncrementalTest, nonConvergedBuildIsRebuiltNextTime)
+{
+    requirePrograms({ "pdflatex" });
+    FixtureCopy fixture("cross-references");
+    auto options = fixture.options();
+    options.maxPasses = 1;
+    auto first = fixture.build(options);
+    ASSERT_FALSE(first.result.success);
+
+    auto second = fixture.build();
+    ASSERT_TRUE(second.result.success) << second.result.lastError;
+    EXPECT_FALSE(second.upToDate);
+    EXPECT_GE(second.result.passes, 1);
+}
+
+TEST_F(IncrementalTest, jobnameInExtraOptionsIsHonoured)
+{
+    requirePrograms({ "pdflatex" });
+    FixtureCopy fixture("cross-references");
+    auto options = fixture.options();
+    options.engineArguments.extraOptions = { "-jobname=paper" };
+
+    auto cold = fixture.build(options);
+    ASSERT_TRUE(cold.result.success) << cold.result.lastError;
+    EXPECT_EQ(cold.result.passes, 2);
+    EXPECT_TRUE(fs::exists(fixture.path("paper.pdf")));
+
+    auto warm = fixture.build(options);
+    EXPECT_TRUE(warm.upToDate);
 }
 
 INSTANTIATE_TEST_SUITE_P(Testdata, FixtureTest, ::testing::ValuesIn(kCases),

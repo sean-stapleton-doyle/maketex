@@ -1,33 +1,12 @@
 #include "maketex/ToolFactory.h"
 
+#include "maketex/tools/BiberTool.h"
 #include "maketex/tools/BibtexTool.h"
 #include "maketex/tools/HashTriggeredTool.h"
 
 #include <utility>
 
 namespace maketex {
-
-ToolFactory::ToolFactory(IFileHasher& hasher)
-    : m_hasher(hasher)
-{
-}
-
-std::unique_ptr<ITool> ToolFactory::hashTriggered(
-    std::string name,
-    std::string triggerExtension,
-    std::vector<std::string> argv,
-    InvokerKind kind,
-    bool runOnce)
-{
-    return std::make_unique<HashTriggeredTool>(
-        std::move(name), std::move(triggerExtension), std::move(argv),
-        kind, m_hasher, runOnce);
-}
-
-std::unique_ptr<ITool> ToolFactory::bibtex()
-{
-    return std::make_unique<BibtexTool>();
-}
 
 std::optional<ToolKind> parseToolKind(std::string_view name)
 {
@@ -44,23 +23,39 @@ std::optional<ToolKind> parseToolKind(std::string_view name)
     return std::nullopt;
 }
 
-std::unique_ptr<ITool> ToolFactory::create(ToolKind kind)
+std::unique_ptr<ITool> createTool(ToolKind kind)
 {
     switch (kind) {
     case ToolKind::Biber:
-        return hashTriggered("biber", ".bcf", { "biber", "$job" },
-            InvokerKind::Biber, /*runOnce=*/true);
+        return std::make_unique<BiberTool>();
     case ToolKind::Bibtex:
-        return bibtex();
+        return std::make_unique<BibtexTool>();
     case ToolKind::Makeglossaries:
-        return hashTriggered("makeglossaries", ".glo",
-            { "makeglossaries", "$job" }, InvokerKind::Makeglossaries);
+        return std::make_unique<HashTriggeredTool>(HashTriggeredTool::Recipe {
+            .name = "makeglossaries",
+            .kind = InvokerKind::Makeglossaries,
+            .argv = { "makeglossaries", "$job" },
+            .triggerExtensions = { ".glo", ".acn" },
+            .outputExtensions = { ".gls", ".acr" },
+        });
     case ToolKind::Makeindex:
-        return hashTriggered("makeindex", ".idx", { "makeindex", "$job" },
-            InvokerKind::Makeindex);
+        return std::make_unique<HashTriggeredTool>(HashTriggeredTool::Recipe {
+            .name = "makeindex",
+            .kind = InvokerKind::Makeindex,
+            .argv = { "makeindex", "$job" },
+            .triggerExtensions = { ".idx" },
+            .outputExtensions = { ".ind" },
+        });
     case ToolKind::Pythontex:
-        return hashTriggered("pythontex", ".pytxcode", { "pythontex", "$job" },
-            InvokerKind::Pythontex);
+        // pythontex writes into pythontex-files-<job>/; which of those files
+        // the engine reads back depends on the document, so outputs stay
+        // unknown and every pythontex run is followed by an engine pass.
+        return std::make_unique<HashTriggeredTool>(HashTriggeredTool::Recipe {
+            .name = "pythontex",
+            .kind = InvokerKind::Pythontex,
+            .argv = { "pythontex", "$job" },
+            .triggerExtensions = { ".pytxcode" },
+        });
     }
     std::unreachable();
 }

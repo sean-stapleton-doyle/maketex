@@ -12,7 +12,9 @@
 #include <SQLiteCpp/SQLiteCpp.h>
 
 #include <memory>
+#include <optional>
 #include <string>
+#include <string_view>
 #include <unordered_set>
 #include <utility>
 
@@ -22,30 +24,81 @@ namespace maketex {
 
 std::vector<fs::path> texSystemRoots()
 {
-    std::vector<fs::path> roots;
-    for (const char* var : { "TEXMFROOT", "TEXMFSYSVAR", "TEXMFVAR" }) {
+    // Constant for the life of the process, and a watch session builds many
+    // times: ask kpsewhich once, for every tree in one call.
+    static const std::vector<fs::path> roots = [] {
+        // The distribution and its generated caches. TEXMFHOME is left out
+        // on purpose: it holds the user's own packages, whose edits must
+        // trigger rebuilds. TEXMFLOCAL sits outside TEXMFROOT on a full
+        // MacTeX/TeX Live install, and Debian splits out TEXMFMAIN.
+        constexpr std::string_view kVars[] = { "TEXMFROOT", "TEXMFDIST", "TEXMFMAIN",
+            "TEXMFLOCAL", "TEXMFSYSVAR", "TEXMFSYSCONFIG", "TEXMFVAR", "TEXMFCONFIG" };
+        std::string query = "-expand-var=";
+        for (auto var : kVars) {
+            query += '$';
+            query += var;
+            query += '|';
+        }
+        std::vector<fs::path> found;
         try {
-            std::vector<std::string> args { "kpsewhich", "-var-value", var };
+            std::vector<std::string> args { "kpsewhich", query };
             auto result = Process(args).wait();
             if (result.exitCode != 0)
-                continue;
-            auto value = result.stdoutOutput;
-            while (!value.empty() && (value.back() == '\n' || value.back() == '\r'))
-                value.pop_back();
-            if (!value.empty())
-                roots.emplace_back(value);
-        } catch (const std::system_error& e) {
-            // kpsewhich not installed (ENOENT) or not executable: nothing to
-            // ignore. Any other system_error from the first invocation will
-            // recur on the rest, so break out rather than retry.
-            (void)e;
-            break;
+                return found;
+            std::string_view rest = result.stdoutOutput;
+            while (!rest.empty()) {
+                auto bar = rest.find('|');
+                auto value = rest.substr(0, bar);
+                while (!value.empty() && (value.back() == '\n' || value.back() == '\r'))
+                    value.remove_suffix(1);
+                if (value.starts_with("!!"))
+                    value.remove_prefix(2);
+                // Unset variables expand to nothing or stay "$VAR"; path
+                // lists ({a,b}, a:b) are not single roots.
+                if (!value.empty() && !value.starts_with('$')
+                    && value.find_first_of("{}:;") == std::string_view::npos)
+                    found.emplace_back(value);
+                if (bar == std::string_view::npos)
+                    break;
+                rest.remove_prefix(bar + 1);
+            }
+        } catch (const std::system_error&) {
+            // kpsewhich not installed or not executable: nothing to ignore.
         }
-    }
+        return found;
+    }();
     return roots;
 }
 
 namespace {
+
+    // Splits a user-supplied -jobname out of the engine's extra options:
+    // the job name decides where the .fls, .log, .aux, and tool files are,
+    // so it must reach EngineInvocation rather than pass through verbatim.
+    // Accepts -jobname=x, --jobname=x, and -jobname x.
+    std::pair<EngineArguments, std::optional<std::string>> splitJobName(
+        EngineArguments arguments)
+    {
+        std::optional<std::string> jobName;
+        std::vector<std::string> kept;
+        auto& opts = arguments.extraOptions;
+        for (size_t i = 0; i < opts.size(); ++i) {
+            std::string_view opt = opts[i];
+            if (opt.starts_with("--"))
+                opt.remove_prefix(1);
+            if (opt.starts_with("-jobname=")) {
+                jobName = std::string(opt.substr(9));
+            } else if (opt == "-jobname" && i + 1 < opts.size()) {
+                jobName = opts[++i];
+            } else {
+                kept.push_back(opts[i]);
+            }
+        }
+        opts = std::move(kept);
+        if (jobName && jobName->empty())
+            jobName.reset();
+        return { std::move(arguments), std::move(jobName) };
+    }
 
     // A readable summary of everything that changes what the engine and
     // tools produce. A stored database whose fingerprint differs was built
@@ -82,7 +135,8 @@ namespace {
 
 DriverResult runBuild(const BuildOptions& options)
 {
-    auto engine = createEngine(options.engine, options.engineArguments);
+    auto [engineArguments, jobName] = splitJobName(options.engineArguments);
+    auto engine = createEngine(options.engine, engineArguments);
 
     fs::path outDir = options.resolvedOutputDir();
     fs::create_directories(outDir);
@@ -90,11 +144,10 @@ DriverResult runBuild(const BuildOptions& options)
 
     Blake3Hasher hasher;
 
-    ToolFactory factory(hasher);
     std::vector<std::unique_ptr<ITool>> tools;
     tools.reserve(options.tools.size());
     for (ToolKind kind : options.tools)
-        tools.push_back(factory.create(kind));
+        tools.push_back(createTool(kind));
 
     auto db = std::make_unique<SQLite::Database>(
         dbPath.string(), SQLite::OPEN_READWRITE | SQLite::OPEN_CREATE);
@@ -112,6 +165,7 @@ DriverResult runBuild(const BuildOptions& options)
     EngineInvocation inv {
         .texFile = options.texFile,
         .outputDir = outDir,
+        .jobName = jobName,
         .haltOnError = options.haltOnError,
         .shellEscape = options.shellEscape,
         .synctex = options.synctex,
@@ -184,8 +238,12 @@ std::vector<fs::path> publishArtifacts(const fs::path& outDir,
 
 std::optional<BuildFileSets> scanBuildFiles(const BuildOptions& options)
 {
-    fs::path outDir = options.resolvedOutputDir();
-    fs::path flsPath = outDir / (options.texFile.stem().string() + ".fls");
+    EngineInvocation inv {
+        .texFile = options.texFile,
+        .outputDir = options.resolvedOutputDir(),
+        .jobName = splitJobName(options.engineArguments).second,
+    };
+    fs::path flsPath = inv.jobFile(".fls");
 
     FlsParser parser;
     // Re-root recorded paths in case the project moved since the last build

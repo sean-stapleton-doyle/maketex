@@ -10,16 +10,26 @@
 
 namespace maketex {
 
-// Citation changes don't need parsing: rerun decisions hash the whole .aux
-// file (BibtexTool::trackedInputs), which subsumes per-key tracking.
+// The bibliography-relevant content of a .aux file and every child .aux it
+// pulls in via \@input (one per \include'd chapter), in document order.
 struct AuxRecord {
-    // Bare database names from "\\bibdata{}" lines — no .bib extension.
-    // The caller is responsible for locating the actual files via TEXINPUTS.
+    // Bare database names from "\bibdata{}" lines — usually no .bib
+    // extension. The caller locates the actual files.
     std::vector<std::string> bibDataFiles;
+    // Style names from "\bibstyle{}" lines.
+    std::vector<std::string> bibStyles;
+    // Every \citation, \bibdata, and \bibstyle line, newline-joined. This is
+    // exactly what bibtex reads from the .aux, so its digest changes only
+    // when bibtex's output could — unlike the whole file, which LaTeX
+    // rewrites with page numbers and labels on every pass.
+    std::string bibtexSignature;
 };
 
 class AuxParser {
 public:
+    // Parses path and, recursively, the child .aux files it \@input's
+    // (resolved relative to path's directory). A missing child is skipped:
+    // it appears once the engine has processed that \include.
     std::expected<AuxRecord, std::error_code> parse(
         const std::filesystem::path& path) const;
 

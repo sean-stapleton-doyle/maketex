@@ -6,6 +6,7 @@
 #include <filesystem>
 #include <optional>
 #include <regex>
+#include <string_view>
 #include <system_error>
 
 namespace maketex {
@@ -22,6 +23,10 @@ public:
     virtual std::expected<Hash, std::error_code> hashFile(
         const std::filesystem::path& path,
         const std::optional<std::regex>& ignorePattern = { }) const = 0;
+
+    // BLAKE3 hash of an in-memory byte string — for digests of a derived
+    // part of a file (e.g. the citation lines of a .aux).
+    virtual Hash hashBytes(std::string_view bytes) const = 0;
 };
 
 } // namespace maketex
