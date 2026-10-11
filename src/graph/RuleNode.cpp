@@ -40,8 +40,14 @@ bool RuleNode::isStale(const StateDatabase& db) const
 
     for (const auto& node : m_inputs) {
         auto stored = db.getRuleInputHash(m_name, node->path().string());
-        if (!stored)
+        if (!stored) {
+            // Absent when the run was recorded (markRan keeps only existing
+            // inputs) and still absent: a scratch file the run read and then
+            // deleted, like minted's main.w18 or main.pyg. Nothing changed.
+            if (!node->state().exists)
+                continue;
             return true; // new input, never recorded
+        }
         if (!node->state().exists)
             return true; // input disappeared
         if (*stored != node->state().hash)

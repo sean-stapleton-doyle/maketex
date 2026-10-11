@@ -14,6 +14,10 @@ struct EngineInvocation {
     bool haltOnError = true;
     bool shellEscape = false;
     bool synctex = false;
+    // TeX code run before the document, for package options the document
+    // can't know it needs (e.g. minted 2's outputdir). Empty: the engine is
+    // given the tex file directly.
+    std::string preamble;
 
     // The effective TeX job name: explicit jobName if set, else the tex
     // file's stem. Determines the basename of .fls/.log/.aux/.bcf/… files.

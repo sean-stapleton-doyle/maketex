@@ -13,6 +13,7 @@
 #include "maketex/parsers/FlsParser.h"
 #include "maketex/parsers/LogParser.h"
 
+#include <cstdint>
 #include <expected>
 #include <filesystem>
 #include <map>
@@ -33,6 +34,9 @@ struct DriverResult {
     int passes = 0; // how many latex passes were run
     // Nothing needed doing: no engine pass and no tool run.
     bool upToDate = false;
+    // Why each extra engine pass ran, in order: "pass 2: main.aux changed",
+    // "pass 3: biber rewrote main.bbl", …
+    std::vector<std::string> rerunReasons;
     std::string lastError; // set on failure
     std::vector<Diagnostic> diagnostics; // extracted from engine/tool output
 };
@@ -69,11 +73,15 @@ public:
         // the token that cancels the build.
         WaitLimits processLimits;
         // Lines to leave out when hashing files with a given extension, for
-        // content that changes without meaning anything. Default: the
-        // %%CreationDate stamp regenerated EPS figures carry, which would
-        // otherwise defeat convergence detection.
+        // content that changes without meaning anything to the next pass:
+        // - the %%CreationDate stamp regenerated EPS figures carry;
+        // - \@writefile lines in .aux files, which LaTeX skips when it reads
+        //   the .aux (they reach the next pass only through the .toc/.lof
+        //   files, which are tracked themselves). Without this, adding a
+        //   section costs a pass even in a document with no contents list.
         std::vector<std::pair<std::string, std::regex>> contentFilters {
             { "eps", std::regex { R"(^%%CreationDate: )" } },
+            { "aux", std::regex { R"(^\\@writefile\{)" } },
         };
     };
 
@@ -103,6 +111,8 @@ private:
         // A tool rewrote a file the engine reads back (or has unknown
         // outputs), so the engine must run again.
         bool outputsChanged = false;
+        // What changed, for rerun reasons: "biber rewrote main.bbl".
+        std::vector<std::string> changes;
         std::optional<RunResult<ToolInvocation>> failure;
         std::string failedToolName;
         std::optional<std::error_code> snapshotError;
@@ -164,18 +174,25 @@ private:
     // failure.
     ToolPassOutcome runStaleTools(const ToolContext& ctx, FileStateTracker& tracker);
 
-    // Whether a file the pass reported missing ("No file main.toc.") now
-    // exists, so the next pass would read it.
-    bool missingInputAppeared(const LogRecord& log) const;
+    // A file the pass reported missing ("No file main.toc.") that now
+    // exists, so the next pass would read it; nullopt when there is none.
+    std::optional<std::string> appearedInput(const LogRecord& log) const;
 
-    // The main .tex file plus every source the engine read in the previous
-    // pass — the inputs known to exist before the next pass starts.
-    std::vector<std::filesystem::path> knownSources() const;
+    // (mtime, size) of a file, or nullopt when it can't be stat'ed.
+    using Stamp = std::pair<std::filesystem::file_time_type, std::uintmax_t>;
+    using Stamps = std::map<std::filesystem::path, std::optional<Stamp>>;
 
-    // Whether one of sources was modified after passStart: its recorded
-    // hash may not match what the pass compiled.
-    bool sourceEditedDuringPass(const std::vector<std::filesystem::path>& sources,
-        std::filesystem::file_time_type passStart) const;
+    // Stamps of the main .tex file and every source the engine read in the
+    // previous pass — the inputs known to exist before the next pass starts.
+    Stamps stampKnownSources() const;
+
+    // A source whose stamp changed between `before` and now: it was
+    // saved while the pass ran, so its recorded hash may not match what the
+    // pass compiled. Comparing a file with itself, not with a clock, keeps
+    // this right on filesystems whose timestamps lag the system clock
+    // (Linux stamps files with a coarse kernel clock).
+    // The first such source, or nullopt.
+    static std::optional<std::filesystem::path> editedDuringPass(const Stamps& before);
 
     // Forwards event to m_observer when one is set.
     void notify(const BuildEvent& event) const;

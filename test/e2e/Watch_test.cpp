@@ -127,7 +127,7 @@ TEST_F(WatchTest, stoppingWatchStopsTheRunningEngine)
     watch->wait();
 
     auto engineAlive = [&] {
-        auto r = maketex::Process(std::vector<std::string> { "pgrep", "-f", dir.filename().string() }).wait();
+        auto r = maketex::Process(std::vector<std::string> { "pgrep", "-f", "latex.*" + dir.string() }).wait();
         return r.exitCode == 0; // pgrep found a process mentioning the project
     };
     EXPECT_TRUE(eventually([&] { return !engineAlive(); }, 10s))

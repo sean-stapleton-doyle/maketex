@@ -14,6 +14,7 @@
 
 #include <gtest/gtest.h>
 
+#include <chrono>
 #include <filesystem>
 #include <fstream>
 #include <string>
@@ -464,6 +465,9 @@ TEST_F(BuildDriverTest, secondInvocationFastPathAvoidsRehashing)
         + "INPUT " + texFile.string() + "\n";
 
     maketex::test_utils::MockHasher hasher;
+    // An unedited source: modified well outside the racy window, where its
+    // stat data can be trusted.
+    fs::last_write_time(texFile, fs::file_time_type::clock::now() - std::chrono::minutes(1));
 
     FakeEngine firstEngine({ FakeCall {
         .writes = {
@@ -852,6 +856,25 @@ TEST_F(BuildDriverTest, droppedInputStopsBeingADependency)
     EXPECT_TRUE(res.upToDate);
 }
 
+TEST_F(BuildDriverTest, scratchFilesReadAndDeletedDoNotKeepTheBuildStale)
+{
+    // minted writes main.w18 and main.pyg, reads them back, and deletes them:
+    // the .fls lists them as inputs that no longer exist after the pass.
+    auto fls = flsWithTex() + "INPUT " + (m_dir / "main.w18").string() + "\nINPUT "
+        + (m_dir / "main.pyg").string() + "\nOUTPUT " + (m_dir / "main.pyg").string() + "\n";
+    {
+        FakeEngine engine({ FakeCall { .writes = {
+                                           { m_dir / "main.fls", fls },
+                                           { m_dir / "main.log", "This is pdfTeX\n" },
+                                       } } });
+        ASSERT_TRUE(BuildDriver(engine, m_db, m_hasher, makeInv()).run().success);
+    }
+    FakeEngine engine({ });
+    auto res = BuildDriver(engine, m_db, m_hasher, makeInv()).run();
+    EXPECT_TRUE(res.success) << res.lastError;
+    EXPECT_TRUE(res.upToDate);
+}
+
 TEST_F(BuildDriverTest, zeroMaxPassesIsAnError)
 {
     FakeEngine engine({ });
@@ -885,16 +908,21 @@ TEST_F(BuildDriverTest, observerReceivesPassEvents)
     auto res = driver.run();
 
     ASSERT_TRUE(res.success);
-    ASSERT_EQ(events.size(), 4u);
+    ASSERT_EQ(events.size(), 5u);
     EXPECT_EQ(events[0].kind, BuildEvent::Kind::PassStarted);
     EXPECT_EQ(events[0].pass, 1);
     EXPECT_EQ(events[1].kind, BuildEvent::Kind::PassFinished);
     EXPECT_EQ(events[1].pass, 1);
     EXPECT_TRUE(events[1].success);
-    EXPECT_EQ(events[2].kind, BuildEvent::Kind::PassStarted);
+    // Why pass 2 runs, before it starts.
+    EXPECT_EQ(events[2].kind, BuildEvent::Kind::RerunScheduled);
     EXPECT_EQ(events[2].pass, 2);
-    EXPECT_EQ(events[3].kind, BuildEvent::Kind::PassFinished);
+    EXPECT_EQ(events[2].detail, "LaTeX asked for a rerun");
+    EXPECT_EQ(events[3].kind, BuildEvent::Kind::PassStarted);
     EXPECT_EQ(events[3].pass, 2);
+    EXPECT_EQ(events[4].kind, BuildEvent::Kind::PassFinished);
+    EXPECT_EQ(events[4].pass, 2);
+    EXPECT_EQ(res.rerunReasons, (std::vector<std::string> { "pass 2: LaTeX asked for a rerun" }));
 }
 
 TEST_F(BuildDriverTest, observerReceivesToolEvents)

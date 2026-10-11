@@ -34,7 +34,9 @@ public:
     // Returns true if the rule should run:
     //   - no prior successful run recorded in db, OR
     //   - any input's current hash (node.state()) differs from the stored hash, OR
-    //   - an input has no stored hash (newly added dependency).
+    //   - an input has no stored hash (newly added dependency) and exists —
+    //     one that was absent at the recorded run and still is (a scratch
+    //     file the run read and deleted) is not a change.
     bool isStale(const StateDatabase& db) const;
 
     // Persists the current input hashes and updates the rule record.

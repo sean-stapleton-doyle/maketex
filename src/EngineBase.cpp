@@ -66,10 +66,15 @@ std::vector<std::string> EngineBase::texEngineArgs(std::string_view program,
         args.emplace_back("-synctex=1");
     if (!inv.outputDir.empty())
         args.emplace_back("-output-directory=" + inv.outputDir.string());
-    if (inv.jobName)
-        args.emplace_back("-jobname=" + *inv.jobName);
+    if (inv.jobName || !inv.preamble.empty())
+        // With a preamble the first input is TeX code, not the file, so the
+        // job name must be explicit.
+        args.emplace_back("-jobname=" + inv.resolvedJobName());
     appendExtraOptions(args);
-    args.emplace_back(inv.texFile.string());
+    if (inv.preamble.empty())
+        args.emplace_back(inv.texFile.string());
+    else
+        args.emplace_back(inv.preamble + "\\input{\"" + inv.texFile.string() + "\"}");
     return args;
 }
 

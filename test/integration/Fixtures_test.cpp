@@ -133,7 +133,13 @@ TEST_P(FixtureTest, coldBuildSucceedsThenIsUpToDate)
 
     auto cold = fixture.build(optionsFor(fixture));
     ASSERT_TRUE(cold.result.success) << cold.result.lastError;
-    EXPECT_EQ(cold.result.passes, GetParam().coldPasses);
+    std::string tools;
+    for (const auto& t : cold.toolsRun)
+        tools += (tools.empty() ? "" : ", ") + t;
+    std::string reasons;
+    for (const auto& r : cold.result.rerunReasons)
+        reasons += "\n  " + r;
+    EXPECT_EQ(cold.result.passes, GetParam().coldPasses) << "tools run: " << tools << reasons;
     EXPECT_TRUE(fs::exists(fixture.path("main.pdf")))
         << "PDF not published beside main.tex";
     for (const auto& tool : GetParam().tools)

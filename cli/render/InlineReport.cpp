@@ -107,6 +107,9 @@ Element buildReport(const BuildResult& result, const BuildOptions& options,
 
     for (const auto& diagnostic : result.diagnostics)
         rows.push_back(diagnosticRow(diagnostic, verbose));
+    if (verbose)
+        for (const auto& reason : result.rerunReasons)
+            rows.push_back(text("  " + reason) | dim);
 
     std::string passes = passCount(result.passes);
     if (result.upToDate) {

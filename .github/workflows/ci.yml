@@ -17,12 +17,19 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends \
-            g++-14 cmake ninja-build \
+            g++-14 ninja-build pipx \
             texlive-latex-base texlive-latex-recommended texlive-latex-extra \
             texlive-bibtex-extra biber texlive-xetex texlive-luatex \
             texlive-pictures texlive-science texlive-extra-utils \
             texlive-fonts-recommended lmodern fonts-lmodern \
-            python3-pygments
+            python3-pygments python-is-python3 ghostscript texlive-font-utils
+
+      # Ubuntu 24.04's CMake (3.28) can't request C++26 from GCC 14 and
+      # would silently build as C++17; CMakeLists.txt refuses it.
+      - name: Install CMake
+        run: |
+          pipx install cmake
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
 
       - name: Cache CPM sources
         uses: actions/cache@v4

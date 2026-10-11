@@ -46,6 +46,7 @@ namespace {
             "\\ifx\\rEfLiNK",
             "\\fi",
             "\\else",
+            "\\gdef\\minted@oldcachelist{", // minted: cache files to clean up
         };
         for (auto prefix : kChecked)
             if (line.starts_with(prefix))
@@ -87,6 +88,7 @@ std::expected<AuxRecord, std::error_code> AuxParser::parse(const fs::path& path)
     std::set<fs::path> visited { fs::weakly_canonical(path) };
     std::vector<Frame> stack;
     stack.push_back({ path, std::move(*rootLines) });
+    bool lastLineChecked = true;
     // Depth-first in document order, as TeX itself reads the .aux tree.
     while (!stack.empty()) {
         auto& frame = stack.back();
@@ -95,7 +97,12 @@ std::expected<AuxRecord, std::error_code> AuxParser::parse(const fs::path& path)
             continue;
         }
         std::string_view line = frame.lines[frame.next++];
-        if (!isCheckedContent(line))
+        // An indented line continues the previous entry (minted's cache
+        // list spans several lines) and shares its verdict.
+        bool continuation = !line.empty() && (line.front() == ' ' || line.front() == '\t');
+        if (!continuation)
+            lastLineChecked = isCheckedContent(line);
+        if (!lastLineChecked)
             rec.hasUncheckedContent = true;
         if (auto b = extractBraces(line, "\\bibdata{"); !b.empty()) {
             splitComma(b, [&](std::string_view name) {
