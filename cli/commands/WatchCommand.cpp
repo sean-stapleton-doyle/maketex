@@ -185,6 +185,7 @@ namespace {
         Phase phase = Phase::Building;
         int currentPass = 0;
         std::string currentTool;
+        std::string rerunReason; // why the current pass runs (passes 2+)
         bool skippedUpToDate = false;
         BuildResult lastResult;
         std::chrono::milliseconds lastDuration { };
@@ -203,6 +204,8 @@ namespace {
             std::string detail = "building";
             if (state.currentPass > 0)
                 detail += " · pass " + std::to_string(state.currentPass);
+            if (state.currentPass > 1 && !state.rerunReason.empty())
+                detail += " · " + state.rerunReason;
             if (!state.currentTool.empty())
                 detail += " · " + state.currentTool;
             return hbox(text("● ") | color(Color::Yellow),
@@ -293,6 +296,9 @@ namespace {
                         case BuildEvent::Kind::SkippedUpToDate:
                             state.skippedUpToDate = true;
                             break;
+                        case BuildEvent::Kind::RerunScheduled:
+                            state.rerunReason = event.detail;
+                            break;
                         }
                     }
                     post();
@@ -317,6 +323,7 @@ namespace {
                         state.phase = WatchState::Phase::Building;
                         state.currentPass = 0;
                         state.currentTool.clear();
+                        state.rerunReason.clear();
                         state.skippedUpToDate = false;
                         state.lastChanged = std::move(changed);
                     }

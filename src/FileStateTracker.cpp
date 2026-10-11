@@ -1,6 +1,7 @@
 #include "maketex/FileStateTracker.h"
 
 #include <cerrno>
+#include <chrono>
 #include <sys/stat.h>
 
 namespace maketex {
@@ -57,10 +58,22 @@ std::expected<FileState, std::error_code> FileStateTracker::snapshot(
     if (!hashed.has_value())
         return std::unexpected(hashed.error());
 
+    // A file modified within a timestamp tick of now could be rewritten
+    // again with the same size and the same mtime (Linux stamps files with
+    // a coarse clock, HFS+ to the second, FAT to two seconds), and the fast
+    // path would then return this hash for the new content. Like git's
+    // "racily clean" entries, such a state is kept without its mtime, so
+    // the next lookup hashes again.
+    constexpr int64_t kRacyWindowNanos = 3'000'000'000;
+    auto nowNanos = std::chrono::duration_cast<std::chrono::nanoseconds>(
+        std::chrono::system_clock::now().time_since_epoch())
+                        .count();
+    bool racy = nowNanos - mtime < kRacyWindowNanos; // also true for future mtimes
+
     return FileState {
         .path = path.string(),
         .exists = true,
-        .mtime = mtime,
+        .mtime = racy ? 0 : mtime,
         .size = size,
         .hash = hashed.value(),
     };

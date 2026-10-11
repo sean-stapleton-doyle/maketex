@@ -165,3 +165,13 @@ TEST_F(AuxParserTest, packageDataIsUnchecked)
     ASSERT_TRUE(rec.has_value());
     EXPECT_TRUE(rec->hasUncheckedContent);
 }
+
+TEST_F(AuxParserTest, mintedCacheListIsChecked)
+{
+    auto aux = writeAux("main.aux",
+        "\\relax \n\\gdef\\minted@oldcachelist{,\n  default.pygstyle,\n  06FA.pygtex}\n"
+        "\\gdef \\@abspage@last{1}\n");
+    auto rec = AuxParser { }.parse(aux);
+    ASSERT_TRUE(rec.has_value());
+    EXPECT_FALSE(rec->hasUncheckedContent);
+}

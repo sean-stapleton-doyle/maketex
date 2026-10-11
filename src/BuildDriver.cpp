@@ -15,6 +15,7 @@
 
 #include <algorithm>
 #include <ctime>
+#include <format>
 #include <iterator>
 #include <unordered_set>
 
@@ -67,14 +68,16 @@ namespace {
         };
     }
 
-    // Files the engine writes for the user or for maketex, never to read
-    // back: excluded from convergence snapshots (hashing a large PDF every
-    // pass would be pure cost).
+    // Files the engine writes for the user, for maketex, or for other tools,
+    // never content a following pass depends on: excluded from convergence
+    // snapshots (hashing a large PDF every pass would be pure cost). The
+    // .run.xml is logreq's request list for external build tools; biblatex
+    // flips its "active" flags from pass to pass.
     bool isFinalProduct(const fs::path& p)
     {
         auto name = p.filename().string();
         for (std::string_view ext : { ".pdf", ".dvi", ".xdv", ".log", ".fls",
-                 ".synctex.gz", ".synctex" })
+                 ".synctex.gz", ".synctex", ".run.xml" })
             if (name.ends_with(ext))
                 return true;
         return false;
@@ -226,8 +229,12 @@ bool BuildDriver::engineUpToDate(FileStateTracker& tracker)
     // file (the .aux) still requires a rebuild — isStale only looks at
     // inputs. Scratch files a package writes and deletes in the same run
     // (minted's .pyg) are neither and must not block the skip.
+    // A read-back file counts only if it existed when the build was
+    // recorded: minted writes, reads, and deletes main.pyg in every pass.
     for (auto* node : latexRule->outputs()) {
-        bool needed = node->role() == FileRole::Generated || isFinalProduct(node->path());
+        bool needed = isFinalProduct(node->path())
+            || (node->role() == FileRole::Generated
+                && m_db.getRuleInputHash(engineRuleName(), node->path().string()));
         if (needed && !fs::exists(node->path()))
             return false;
     }
@@ -374,6 +381,11 @@ BuildDriver::ToolPassOutcome BuildDriver::runStaleTools(
 
         outcome.ranAny = true;
         outcome.outputsChanged = outcome.outputsChanged || changed;
+        if (changed) {
+            outcome.changes.push_back(outputs.empty()
+                    ? std::string(tool->name()) + " ran (its outputs are not tracked)"
+                    : std::string(tool->name()) + " rewrote " + outputs.front().filename().string());
+        }
         std::ranges::move(diagnostics::extract(toolResult), std::back_inserter(outcome.diagnostics));
     }
     return outcome;
@@ -381,7 +393,7 @@ BuildDriver::ToolPassOutcome BuildDriver::runStaleTools(
 
 // ── convergence signals ───────────────────────────────────────────────────────
 
-bool BuildDriver::missingInputAppeared(const LogRecord& log) const
+std::optional<std::string> BuildDriver::appearedInput(const LogRecord& log) const
 {
     // Every cold run logs "No file <job>.aux.". What it writes there is
     // mostly checked already — LaTeX warns "Label(s) may have changed",
@@ -396,38 +408,49 @@ bool BuildDriver::missingInputAppeared(const LogRecord& log) const
             auto aux = m_inv.jobFile(".aux");
             if (fs::exists(aux, ec))
                 if (auto rec = AuxParser { }.parse(aux); rec && rec->hasUncheckedContent)
-                    return true;
+                    return name + " holds package data LaTeX doesn't check";
             continue;
         }
         for (const auto& dir : { m_inv.outputDir, m_inv.texFile.parent_path() })
             if (fs::exists(dir / name, ec))
-                return true;
+                return name + " now exists";
     }
-    return false;
+    return std::nullopt;
 }
 
-std::vector<fs::path> BuildDriver::knownSources() const
+namespace {
+
+    std::optional<std::pair<fs::file_time_type, std::uintmax_t>> stampOf(const fs::path& path)
+    {
+        std::error_code ec;
+        auto mtime = fs::last_write_time(path, ec);
+        if (ec)
+            return std::nullopt;
+        auto size = fs::file_size(path, ec);
+        if (ec)
+            return std::nullopt;
+        return std::pair { mtime, size };
+    }
+
+} // namespace
+
+BuildDriver::Stamps BuildDriver::stampKnownSources() const
 {
-    std::vector<fs::path> sources { m_inv.texFile };
+    Stamps stamps;
+    stamps[m_inv.texFile] = stampOf(m_inv.texFile);
     if (const auto* latexRule = m_graph.findRule(engineRuleName()))
         for (const auto* node : latexRule->inputs())
             if (node->role() == FileRole::Source)
-                sources.push_back(node->path());
-    return sources;
+                stamps[node->path()] = stampOf(node->path());
+    return stamps;
 }
 
-bool BuildDriver::sourceEditedDuringPass(const std::vector<fs::path>& sources,
-    fs::file_time_type passStart) const
+std::optional<fs::path> BuildDriver::editedDuringPass(const Stamps& before)
 {
-    std::error_code ec;
-    for (const auto& path : sources) {
-        // Strictly later: on a filesystem with coarse timestamps an edit in
-        // the same tick is missed rather than looping forever.
-        auto mtime = fs::last_write_time(path, ec);
-        if (!ec && mtime > passStart)
-            return true;
-    }
-    return false;
+    for (const auto& [path, stamp] : before)
+        if (stampOf(path) != stamp)
+            return path;
+    return std::nullopt;
 }
 
 // ── BuildDriver::persistFileStates ───────────────────────────────────────────
@@ -504,9 +527,11 @@ DriverResult BuildDriver::run()
         notify({ .kind = BuildEvent::Kind::PassStarted, .pass = pass + 1 });
         // Sources that exist before the pass; a file created during it
         // (epstopdf's figure-eps-converted-to.pdf) is generated, not edited.
-        auto sourcesBefore = knownSources();
-        auto passStart = fs::file_time_type::clock::now();
+        auto sourcesBefore = stampKnownSources();
         auto engineResult = m_engine.run(m_inv, m_processLimits);
+        // Checked now, before tools rewrite their outputs (.bbl is a source
+        // the engine reads): only the user's saves during the pass count.
+        auto edited = editedDuringPass(sourcesBefore);
         ++result.passes;
         notify({ .kind = BuildEvent::Kind::PassFinished,
             .pass = pass + 1,
@@ -541,7 +566,8 @@ DriverResult BuildDriver::run()
         // existed before the pass can have changed; one written for the
         // first time is caught by the log (a rerun warning, or "No file …"
         // for something now present).
-        bool readBackChanged = std::ranges::any_of(m_graph.files(), [&](const FileNode* f) {
+        auto files = m_graph.files();
+        auto readBackChanged = std::ranges::find_if(files, [&](const FileNode* f) {
             if (f->role() != FileRole::Generated)
                 return false;
             auto was = before->find(f->path().string());
@@ -558,10 +584,24 @@ DriverResult BuildDriver::run()
         }
         std::ranges::move(tools.diagnostics, std::back_inserter(toolWarnings));
 
-        bool rerun = ctx.log().rerunNeeded || readBackChanged
-            || missingInputAppeared(ctx.log()) || sourceEditedDuringPass(sourcesBefore, passStart)
-            || tools.outputsChanged;
-        if (!rerun) {
+        std::vector<std::string> reasons;
+        if (ctx.log().rerunNeeded)
+            reasons.emplace_back("LaTeX asked for a rerun");
+        if (readBackChanged != files.end())
+            reasons.push_back((*readBackChanged)->path().filename().string() + " changed");
+        if (auto appeared = appearedInput(ctx.log()))
+            reasons.push_back(*appeared);
+        if (edited)
+            reasons.push_back(edited->filename().string() + " was saved during the pass");
+        reasons.insert(reasons.end(), tools.changes.begin(), tools.changes.end());
+        if (!reasons.empty()) {
+            std::string why;
+            for (const auto& r : reasons)
+                why += (why.empty() ? "" : "; ") + r;
+            result.rerunReasons.push_back(std::format("pass {}: {}", pass + 2, why));
+            notify({ .kind = BuildEvent::Kind::RerunScheduled, .pass = pass + 2, .detail = why });
+        }
+        if (reasons.empty()) {
             latexRule.markRan(m_db, true, command);
             persistFileStates();
             result.success = true;

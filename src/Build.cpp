@@ -249,6 +249,42 @@ namespace {
         return std::nullopt;
     }
 
+    // minted before v3 runs pygmentize from the document directory but
+    // expects its files where the engine writes them, so with an output
+    // directory it needs `outputdir` (minted 3, TeX Live 2024+, finds it
+    // itself). The document can't know maketex moved its outputs, so maketex
+    // passes the option. Returns the TeX code to run first, or empty.
+    std::string mintedPreamble(const fs::path& texFile, const fs::path& outDir)
+    {
+        auto req = analyzeRequirements(texFile);
+        if (std::ranges::find(req.packages, "minted") == req.packages.end())
+            return { };
+        std::string sty;
+        try {
+            auto r = Process(std::vector<std::string> { "kpsewhich", "minted.sty" })
+                         .wait({ .timeout = std::chrono::seconds(5) });
+            sty = r.stdoutOutput.substr(0, r.stdoutOutput.find('\n'));
+        } catch (const std::system_error&) {
+            return { };
+        }
+        std::ifstream in(sty);
+        std::string line;
+        bool v2 = false;
+        for (int i = 0; i < 60 && std::getline(in, line); ++i) {
+            if (auto v = line.find(" v"); line.contains("Yet another Pygments shim") && v != std::string::npos) {
+                v2 = line.substr(v + 2, 1) < "3";
+                break;
+            }
+        }
+        if (!v2)
+            return { };
+        // Relative to the document directory (the engine's working
+        // directory): minted also uses it in shell commands, where an
+        // absolute path with spaces would break.
+        auto rel = fs::relative(outDir, texFile.parent_path()).generic_string();
+        return "\\PassOptionsToPackage{outputdir=" + rel + "}{minted}";
+    }
+
     BuildResult buildWith(const BuildOptions& options, EngineKind engineKind)
     {
         auto [engineArguments, jobName] = splitJobName(options.engineArguments);
@@ -275,6 +311,7 @@ namespace {
             .haltOnError = options.haltOnError,
             .shellEscape = options.shellEscape,
             .synctex = options.synctex,
+            .preamble = mintedPreamble(options.texFile, outDir),
         };
 
         // Held until the build returns: a second maketex building this

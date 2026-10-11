@@ -47,6 +47,10 @@ namespace {
             if (!diagnostic.hint.empty())
                 std::cerr << "  hint: " << diagnostic.hint << "\n";
         }
+        // Why the build took the passes it did — "pass 2: main.aux changed".
+        if (options.extras.verbose)
+            for (const auto& reason : result.rerunReasons)
+                std::cerr << "maketex: " << reason << "\n";
         if (!result.engineReason.empty())
             std::cerr << "maketex: engine " << engineLabel(result.engine, result.engineReason) << "\n";
         std::string passes = passCount(result.passes);

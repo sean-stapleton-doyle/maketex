@@ -79,6 +79,16 @@ if(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
 endif()
 
 # ── Toolchain probes ──────────────────────────────────────────────────────────
+# An older CMake that doesn't know how to request this standard from the
+# compiler would silently build with the compiler's default (C++17 for GCC
+# 14 under Ubuntu 24.04's CMake 3.28). Fail loudly instead.
+if(NOT CMAKE_CXX${CMAKE_CXX_STANDARD}_STANDARD_COMPILE_OPTION)
+    message(FATAL_ERROR
+        "CMake ${CMAKE_VERSION} doesn't know how to enable C++${CMAKE_CXX_STANDARD} for "
+        "${CMAKE_CXX_COMPILER_ID} ${CMAKE_CXX_COMPILER_VERSION}. Use a newer CMake "
+        "(for example `pipx install cmake`).")
+endif()
+
 # Supported toolchains differ in what they ship by default; probe instead of
 # assuming the newest.
 include(CheckSymbolExists)

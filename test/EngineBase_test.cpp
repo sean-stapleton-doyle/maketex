@@ -318,3 +318,26 @@ TEST_F(EngineBaseTest, runSetsLogWidthEnvironment)
     EXPECT_EQ(result.exitCode, 0);
     EXPECT_EQ(result.stdoutOutput, "10000\n");
 }
+
+TEST_F(EngineBaseTest, preambleRunsBeforeTheDocumentWithAnExplicitJobName)
+{
+    // minted 2's outputdir: the first input becomes TeX code, so the job
+    // name can no longer come from the file and must be passed.
+    PdfLatexEngine engine;
+    EngineInvocation inv;
+    inv.texFile = "/docs/my paper.tex";
+    inv.preamble = "\\PassOptionsToPackage{outputdir=.maketex}{minted}";
+    auto args = engine.buildArgs(inv);
+    EXPECT_EQ(args.back(), "\\PassOptionsToPackage{outputdir=.maketex}{minted}\\input{\"/docs/my paper.tex\"}");
+    EXPECT_NE(std::ranges::find(args, "-jobname=my paper"), args.end());
+}
+
+TEST_F(EngineBaseTest, noPreambleKeepsThePlainInvocation)
+{
+    PdfLatexEngine engine;
+    EngineInvocation inv;
+    inv.texFile = "doc.tex";
+    auto args = engine.buildArgs(inv);
+    EXPECT_EQ(args.back(), "doc.tex");
+    EXPECT_TRUE(std::ranges::none_of(args, [](const std::string& a) { return a.starts_with("-jobname"); }));
+}

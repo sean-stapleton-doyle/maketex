@@ -36,7 +36,9 @@ TEST_F(FileWatcherTest, snapshotRecordsExistenceAndSize)
     ASSERT_EQ(entries.size(), 2u);
     EXPECT_TRUE(entries[0].exists);
     EXPECT_EQ(entries[0].size, 5u);
-    EXPECT_GT(entries[0].mtimeNs, 0);
+    // Only compared for equality; libstdc++'s file clock has a different
+    // epoch, so the value may be negative.
+    EXPECT_NE(entries[0].mtimeNs, 0);
     EXPECT_FALSE(entries[1].exists);
 }
 

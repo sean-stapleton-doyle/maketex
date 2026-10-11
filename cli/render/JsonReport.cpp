@@ -37,6 +37,7 @@ void printJsonReport(const BuildResult& result, const BuildOptions& options,
     doc["success"] = result.success;
     doc["upToDate"] = result.upToDate;
     doc["passes"] = result.passes;
+    doc["rerunReasons"] = result.rerunReasons;
     doc["error"] = result.success ? nlohmann::json(nullptr)
                                   : nlohmann::json(result.lastError);
     doc["document"] = options.texFile.string();

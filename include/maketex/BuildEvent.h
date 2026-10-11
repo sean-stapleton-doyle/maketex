@@ -15,12 +15,14 @@ struct BuildEvent {
         ToolStarted, // an auxiliary tool is about to run; toolName is set
         ToolFinished, // the tool exited; toolName and success are set
         SkippedUpToDate, // incremental check passed — the build is a no-op
+        RerunScheduled, // another pass follows; pass is its number, detail why
     };
 
     Kind kind = Kind::PassStarted;
     int pass = 0; // engine pass number; 0 for tool events
     std::string toolName;
     bool success = true;
+    std::string detail; // RerunScheduled: the reasons, "; "-separated
 };
 
 using BuildObserver = std::function<void(const BuildEvent&)>;
