@@ -179,3 +179,12 @@ TEST(ParseCliArgs, usageErrorsExitTwoAndHelpExitsZero)
     EXPECT_EQ(parseCliArgs(args({ "build", "--no-such-flag" })).exitCode, maketex::cli::kExitUsage);
     EXPECT_EQ(parseCliArgs(args({ "--help" })).exitCode, maketex::cli::kExitSuccess);
 }
+
+TEST(NormalizeArgv, optionValuesAreNotSubcommands)
+{
+    // `-o build` names an output directory, not the build command.
+    EXPECT_EQ(normalizeArgv(args({ "-o", "build" })), args({ "build", "-o", "build" }));
+    EXPECT_EQ(normalizeArgv(args({ "--engine-program", "watch", "doc.tex" }))[0], "build");
+    // A flag without a value still lets the subcommand through.
+    EXPECT_EQ(normalizeArgv(args({ "-o", "out", "--plain", "watch" }))[0], "watch");
+}

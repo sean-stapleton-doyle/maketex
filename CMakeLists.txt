@@ -197,4 +197,28 @@ if(MAKETEX_BUILD_TESTS)
         PROPERTIES LABELS integration TIMEOUT 300
         DISCOVERY_TIMEOUT 30
     )
+
+    # End-to-end: run the real `maketex` binary (args, cwd, env, exit code,
+    # output). Shares the fixture-copy helpers with the integration suite.
+    if(MAKETEX_BUILD_CLI)
+        file(GLOB E2E_SOURCES CONFIGURE_DEPENDS test/e2e/*.cpp)
+        add_executable(maketex_e2e_tests ${E2E_SOURCES}
+            test/integration/FixtureHarness.cpp)
+        add_dependencies(maketex_e2e_tests maketex_app)
+        target_include_directories(maketex_e2e_tests PRIVATE test/integration)
+        target_link_libraries(maketex_e2e_tests PRIVATE
+            maketex
+            maketex_build_settings
+            nlohmann_json::nlohmann_json
+            GTest::gtest_main
+        )
+        target_compile_definitions(maketex_e2e_tests PRIVATE
+            MAKETEX_TESTDATA_DIR="${CMAKE_SOURCE_DIR}/testdata"
+            MAKETEX_BINARY="$<TARGET_FILE:maketex_app>"
+        )
+        gtest_discover_tests(maketex_e2e_tests
+            PROPERTIES LABELS e2e TIMEOUT 300
+            DISCOVERY_TIMEOUT 30
+        )
+    endif()
 endif()

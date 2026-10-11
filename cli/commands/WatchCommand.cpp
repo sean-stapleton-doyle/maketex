@@ -156,12 +156,17 @@ namespace {
                               << (watched == 1 ? "" : "s") << " ("
                               << duration.count()
                               << " ms build, Ctrl-C to stop)\n";
+                    // Each report must reach a pipe (`| tee log`, an editor
+                    // plugin) now, not when the buffer fills or we exit.
+                    std::cout.flush();
+                    std::cerr.flush();
                 },
             .onRebuild =
                 [](const std::vector<fs::path>& changed) {
                     for (const auto& p : changed)
                         std::cout << "maketex: changed: "
                                   << p.filename().string() << "\n";
+                    std::cout.flush();
                 },
         };
 

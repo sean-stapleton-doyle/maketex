@@ -14,6 +14,7 @@
 #include <SQLiteCpp/SQLiteCpp.h>
 
 #include <cerrno>
+#include <cstdlib>
 #include <fcntl.h>
 #include <sys/file.h>
 #include <unistd.h>
@@ -145,12 +146,15 @@ namespace {
         fp += ";haltOnError=";
         fp += options.haltOnError ? '1' : '0';
         // Where the engine and tools look for inputs changes what they
-        // produce as surely as a flag does.
-        for (const auto& [var, value] : toolSearchEnv(options.texFile.parent_path())) {
+        // produce as surely as a flag does. The user's own values only: the
+        // document directory maketex adds must stay out, or moving the
+        // project (a restored CI cache) would reset its state.
+        for (const char* var : { "TEXINPUTS", "BIBINPUTS", "BSTINPUTS", "INDEXSTYLE" }) {
             fp += ';';
             fp += var;
             fp += '=';
-            fp += value;
+            if (const char* value = std::getenv(var))
+                fp += value;
         }
         return fp;
     }
