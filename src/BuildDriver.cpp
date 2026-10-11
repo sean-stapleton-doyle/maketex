@@ -383,15 +383,22 @@ BuildDriver::ToolPassOutcome BuildDriver::runStaleTools(
 
 bool BuildDriver::missingInputAppeared(const LogRecord& log) const
 {
-    // Every cold run logs "No file <job>.aux.". The .aux's effect on the
-    // next pass is checked by LaTeX itself (it warns "Label(s) may have
-    // changed" when labels moved), so a newly written .aux is not by itself
-    // a reason to rerun — that is what makes a simple document one pass.
+    // Every cold run logs "No file <job>.aux.". What it writes there is
+    // mostly checked already — LaTeX warns "Label(s) may have changed",
+    // tools key on bibliography records — so a newly written .aux forces a
+    // second pass only when it holds content nothing checks. That keeps a
+    // simple document at one pass without trusting a package's custom
+    // .aux data to a single run.
     auto ownAux = m_inv.resolvedJobName() + ".aux";
     std::error_code ec;
     for (const auto& name : log.missingFiles) {
-        if (name == ownAux)
+        if (name == ownAux) {
+            auto aux = m_inv.jobFile(".aux");
+            if (fs::exists(aux, ec))
+                if (auto rec = AuxParser { }.parse(aux); rec && rec->hasUncheckedContent)
+                    return true;
             continue;
+        }
         for (const auto& dir : { m_inv.outputDir, m_inv.texFile.parent_path() })
             if (fs::exists(dir / name, ec))
                 return true;

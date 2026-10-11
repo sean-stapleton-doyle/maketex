@@ -2,6 +2,8 @@
 
 #include "maketex/Process.h"
 
+#include <array>
+#include <cerrno>
 #include <cstdlib>
 #include <fstream>
 #include <optional>
@@ -9,6 +11,16 @@
 #include <stdexcept>
 #include <string_view>
 #include <unistd.h>
+
+#include <csignal>
+#include <fcntl.h>
+#include <poll.h>
+#include <sys/wait.h>
+#if __has_include(<util.h>)
+#include <util.h> // forkpty on macOS
+#else
+#include <pty.h> // forkpty on Linux
+#endif
 
 extern char** environ;
 
@@ -85,6 +97,79 @@ CliResult CliRunner::run(const std::vector<std::string>& args, const fs::path& c
         .err = std::move(r.stderrOutput),
         .timedOut = r.timedOut,
     };
+}
+
+CliResult CliRunner::runInTerminal(const std::vector<std::string>& args, const fs::path& cwd,
+    const std::string& input, std::chrono::seconds timeout) const
+{
+    // Everything the child needs is prepared before fork: after it, only
+    // async-signal-safe calls (chdir, execve) may run in this threaded
+    // process.
+    std::vector<std::string> argvStorage { binary().string() };
+    argvStorage.insert(argvStorage.end(), args.begin(), args.end());
+    std::vector<char*> argv;
+    for (auto& a : argvStorage)
+        argv.push_back(a.data());
+    argv.push_back(nullptr);
+
+    std::map<std::string, std::string> merged;
+    for (char** e = environ; *e; ++e) {
+        std::string_view entry(*e);
+        auto eq = entry.find('=');
+        merged[std::string(entry.substr(0, eq))] = std::string(entry.substr(eq + 1));
+    }
+    for (const auto& [k, v] : m_env)
+        merged[k] = v;
+    merged.erase("NO_COLOR"); // a terminal user's view
+    std::vector<std::string> envStorage;
+    for (const auto& [k, v] : merged)
+        envStorage.push_back(k + "=" + v);
+    std::vector<char*> envp;
+    for (auto& e : envStorage)
+        envp.push_back(e.data());
+    envp.push_back(nullptr);
+    std::string dir = cwd.string();
+
+    int master = -1;
+    pid_t pid = ::forkpty(&master, nullptr, nullptr, nullptr);
+    if (pid < 0)
+        throw std::runtime_error("forkpty failed");
+    if (pid == 0) {
+        if (::chdir(dir.c_str()) != 0)
+            ::_exit(126);
+        ::execve(argv[0], argv.data(), envp.data());
+        ::_exit(127);
+    }
+
+    if (!input.empty())
+        (void)::write(master, input.data(), input.size());
+
+    CliResult result;
+    auto deadline = std::chrono::steady_clock::now() + timeout;
+    std::array<char, 4096> buf;
+    while (true) {
+        auto left = std::chrono::duration_cast<std::chrono::milliseconds>(
+            deadline - std::chrono::steady_clock::now());
+        if (left.count() <= 0) {
+            ::kill(pid, SIGKILL);
+            result.timedOut = true;
+            break;
+        }
+        pollfd pfd { master, POLLIN, 0 };
+        if (::poll(&pfd, 1, static_cast<int>(left.count())) <= 0)
+            continue;
+        auto n = ::read(master, buf.data(), buf.size());
+        if (n <= 0)
+            break; // EIO once the child has exited and closed the terminal
+        result.out.append(buf.data(), static_cast<size_t>(n));
+    }
+    ::close(master);
+    int status = 0;
+    while (::waitpid(pid, &status, 0) < 0 && errno == EINTR) { }
+    result.exitCode = WIFEXITED(status) ? WEXITSTATUS(status) : -1;
+    // Terminals turn \n into \r\n.
+    std::erase(result.out, '\r');
+    return result;
 }
 
 FakeToolchain::FakeToolchain(fs::path dir)

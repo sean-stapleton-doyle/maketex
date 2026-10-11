@@ -29,6 +29,12 @@ public:
     CliResult run(const std::vector<std::string>& args, const std::filesystem::path& cwd,
         std::chrono::seconds timeout = std::chrono::seconds(120)) const;
 
+    // Runs the binary attached to a pseudo-terminal — as from an
+    // interactive shell — typing `input` into it. stdout and stderr arrive
+    // interleaved in `out`, as the user would see them.
+    CliResult runInTerminal(const std::vector<std::string>& args, const std::filesystem::path& cwd,
+        const std::string& input, std::chrono::seconds timeout = std::chrono::seconds(120)) const;
+
     void setEnv(const std::string& name, std::string value) { m_env[name] = std::move(value); }
     // Prepends dir to PATH for every run.
     void prependPath(const std::filesystem::path& dir);

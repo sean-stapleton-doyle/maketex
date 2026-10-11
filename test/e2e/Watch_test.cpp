@@ -6,6 +6,8 @@
 #include "maketex/Process.h"
 
 #include <chrono>
+#include <csignal>
+#include <fstream>
 #include <optional>
 #include <thread>
 
@@ -84,4 +86,50 @@ TEST_F(WatchTest, creatingAMissingInputRebuilds)
     write(dir / "later.tex", "Written later.\n");
     EXPECT_TRUE(eventually([&] { return fs::exists(dir / "main.pdf"); }))
         << "creating later.tex did not trigger a rebuild";
+}
+
+TEST_F(WatchTest, saveDuringABuildTriggersAnotherBuild)
+{
+    // A deliberately slow document: the edit lands while pass 1 runs.
+    auto doc = [](const std::string& marker) {
+        return "\\documentclass{article}\n\\newcount\\n\n"
+               "\\loop\\advance\\n by 1 \\ifnum\\n<15000000 \\repeat\n"
+               "\\typeout{MARKER-"
+            + marker + "}\n\\begin{document}\nSlow.\n\\end{document}\n";
+    };
+    auto dir = project("slow");
+    write(dir / "main.tex", doc("first"));
+    auto watch = startWatch(dir);
+
+    // Wait for the engine to start pass 1, then save.
+    ASSERT_TRUE(eventually([&] { return fs::exists(dir / ".maketex" / "main.log"); }));
+    write(dir / "main.tex", doc("second"));
+
+    auto logHasSecond = [&] {
+        std::ifstream log(dir / ".maketex" / "main.log");
+        std::string text((std::istreambuf_iterator<char>(log)), { });
+        return contains(text, "MARKER-second");
+    };
+    EXPECT_TRUE(eventually(logHasSecond, 120s)) << "the save made during the build was lost";
+}
+
+TEST_F(WatchTest, stoppingWatchStopsTheRunningEngine)
+{
+    // An engine pass that never ends; SIGTERM to maketex alone (what an
+    // editor plugin or process supervisor sends) must not orphan it.
+    auto dir = project("forever");
+    write(dir / "main.tex",
+        "\\documentclass{article}\n\\begin{document}\n\\def\\x{\\x}\\x\n\\end{document}\n");
+    auto watch = startWatch(dir);
+    ASSERT_TRUE(eventually([&] { return fs::exists(dir / ".maketex" / "main.log"); }));
+
+    watch->kill(); // SIGTERM to maketex only
+    watch->wait();
+
+    auto engineAlive = [&] {
+        auto r = maketex::Process({ "pgrep", "-f", dir.filename().string() }).wait();
+        return r.exitCode == 0; // pgrep found a process mentioning the project
+    };
+    EXPECT_TRUE(eventually([&] { return !engineAlive(); }, 10s))
+        << "pdflatex kept running after maketex was stopped";
 }

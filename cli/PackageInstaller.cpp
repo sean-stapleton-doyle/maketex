@@ -4,6 +4,7 @@
 
 #include <algorithm>
 #include <cerrno>
+#include <csignal>
 #include <format>
 #include <iostream>
 #include <set>
@@ -38,8 +39,18 @@ namespace {
         for (const auto& a : args)
             argv.push_back(const_cast<char*>(a.c_str())); // NOLINT — POSIX API
         argv.push_back(nullptr);
+        // sudo and tlmgr start with default signal handling (see Process),
+        // so Ctrl-C reaches them.
+        posix_spawnattr_t attr;
+        posix_spawnattr_init(&attr);
+        sigset_t none;
+        sigemptyset(&none);
+        posix_spawnattr_setsigmask(&attr, &none);
+        posix_spawnattr_setflags(&attr, POSIX_SPAWN_SETSIGMASK);
         pid_t pid;
-        if (::posix_spawnp(&pid, argv[0], nullptr, nullptr, argv.data(), environ) != 0)
+        int err = ::posix_spawnp(&pid, argv[0], nullptr, &attr, argv.data(), environ);
+        posix_spawnattr_destroy(&attr);
+        if (err != 0)
             return -1;
         int status = 0;
         while (::waitpid(pid, &status, 0) < 0 && errno == EINTR) { }

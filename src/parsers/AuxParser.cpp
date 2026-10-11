@@ -14,6 +14,49 @@ namespace {
     // hand-edited or corrupted .aux could still contain.
     constexpr size_t kMaxAuxDepth = 16;
 
+    // Lines whose effect on the next pass something already watches.
+    bool isCheckedContent(std::string_view line)
+    {
+        while (!line.empty() && (line.front() == ' ' || line.front() == '\t'))
+            line.remove_prefix(1);
+        if (line.empty())
+            return true;
+        constexpr std::string_view kChecked[] = {
+            "\\relax", // the kernel's opening line
+            "\\gdef \\@abspage@last{", // page total; see note below
+            "\\newlabel{", // LaTeX: "Label(s) may have changed"
+            "\\@writefile{", // .toc/.lof/.lot: "No file …" on first use
+            "\\@input{", // a child .aux, checked line by line itself
+            "\\citation{",
+            "\\bibdata{",
+            "\\bibstyle{",
+            "\\bibcite{", // bibtex
+            "\\abx@aux@", // biblatex: "Please (re)run" warnings, biber inputs
+            "\\providecommand\\hyper@newdestlabel",
+            "\\providecommand\\HyField@",
+            "\\providecommand*\\HyPL@Entry",
+            "\\HyPL@Entry{", // hyperref: own rerun warning
+            "\\providecommand\\babel@aux",
+            "\\babel@aux{",
+            "\\@nameuse{bbl@beforestart}",
+            "\\catcode",
+            "\\@ifundefined",
+            "\\global\\let",
+            "\\gdef\\HyperFirstAtBeginDocument",
+            "\\ifx\\rEfLiNK",
+            "\\fi",
+            "\\else",
+        };
+        for (auto prefix : kChecked)
+            if (line.starts_with(prefix))
+                return true;
+        return false;
+    }
+    // \@abspage@last is the kernel's page total. It is ignored here because
+    // every document writes it, and treating it as unchecked would cost
+    // every cold build a second pass; documents that print "page X of Y"
+    // use lastpage or zref, whose \newlabel entries are checked.
+
 } // namespace
 
 std::expected<AuxRecord, std::error_code> AuxParser::parse(const fs::path& path) const
@@ -52,6 +95,8 @@ std::expected<AuxRecord, std::error_code> AuxParser::parse(const fs::path& path)
             continue;
         }
         std::string_view line = frame.lines[frame.next++];
+        if (!isCheckedContent(line))
+            rec.hasUncheckedContent = true;
         if (auto b = extractBraces(line, "\\bibdata{"); !b.empty()) {
             splitComma(b, [&](std::string_view name) {
                 rec.bibDataFiles.emplace_back(name);

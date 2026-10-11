@@ -139,3 +139,29 @@ TEST_F(AuxParserTest, signatureIgnoresLabelsAndPageNumbers)
     EXPECT_EQ(AuxParser { }.parse(first)->bibtexSignature,
         AuxParser { }.parse(second)->bibtexSignature);
 }
+
+TEST_F(AuxParserTest, everydayContentIsChecked)
+{
+    // What a plain, cross-referenced, hyperref'd, bibtex document writes:
+    // all of it is watched by something else, so no extra pass.
+    auto aux = writeAux("main.aux",
+        "\\relax \n"
+        "\\providecommand\\hyper@newdestlabel[2]{}\n"
+        "\\providecommand\\HyField@AuxAddToFields[1]{}\n"
+        "\\providecommand\\babel@aux[2]{}\n\\babel@aux{english}{}\n"
+        "\\citation{knuth}\n\\bibstyle{plain}\n\\bibdata{refs}\n"
+        "\\@writefile{toc}{\\contentsline {section}{\\numberline {1}Intro}{1}{}}\n"
+        "\\newlabel{sec:intro}{{1}{1}{}{section.1}{}}\n"
+        "\\gdef \\@abspage@last{1}\n");
+    auto rec = AuxParser { }.parse(aux);
+    ASSERT_TRUE(rec.has_value());
+    EXPECT_FALSE(rec->hasUncheckedContent);
+}
+
+TEST_F(AuxParserTest, packageDataIsUnchecked)
+{
+    auto aux = writeAux("main.aux", "\\relax\n\\gdef\\totalfigures{3}\n");
+    auto rec = AuxParser { }.parse(aux);
+    ASSERT_TRUE(rec.has_value());
+    EXPECT_TRUE(rec->hasUncheckedContent);
+}

@@ -206,6 +206,9 @@ if(MAKETEX_BUILD_TESTS)
             MAKETEX_TESTDATA_DIR="${CMAKE_SOURCE_DIR}/testdata"
             MAKETEX_BINARY="$<TARGET_FILE:maketex_app>"
         )
+        if(NOT APPLE)
+            target_link_libraries(maketex_e2e_tests PRIVATE util) # forkpty
+        endif()
         gtest_discover_tests(maketex_e2e_tests
             PROPERTIES LABELS e2e TIMEOUT 300
             DISCOVERY_TIMEOUT 30
