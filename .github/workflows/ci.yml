@@ -42,10 +42,13 @@ jobs:
         run: cmake --build build
 
       - name: Unit tests
-        run: ctest --test-dir build --label-exclude integration --output-on-failure -j 4
+        run: ctest --test-dir build --label-exclude "integration|e2e" --output-on-failure -j 4
 
       - name: Integration tests
         run: ctest --test-dir build --label-regex integration --output-on-failure -j 4
+
+      - name: End-to-end tests (the maketex binary)
+        run: ctest --test-dir build --label-regex e2e --output-on-failure -j 4
 
   # Unit tests on the primary development platform.
   macos:
@@ -59,7 +62,7 @@ jobs:
       - name: Build
         run: cmake --build build
       - name: Unit tests
-        run: ctest --test-dir build --label-exclude integration --output-on-failure -j 4
+        run: ctest --test-dir build --label-exclude "integration|e2e" --output-on-failure -j 4
 
   format:
     runs-on: ubuntu-24.04

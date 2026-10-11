@@ -25,10 +25,22 @@ std::vector<std::string> normalizeArgv(std::vector<std::string> args)
     if (isSubcommand(first) || first == "--help" || first == "-h" || first == "--version")
         return args;
     // Flags before the subcommand (`maketex --plain watch`): move it to the
-    // front. Only the first non-flag counts — any later word is the
-    // document, so `maketex paper watch` stays a build of paper.
-    auto firstNonFlag = std::ranges::find_if(args,
-        [](const std::string& a) { return !a.starts_with('-'); });
+    // front. Only the first positional word counts — any later word is the
+    // document, so `maketex paper watch` stays a build of paper — and an
+    // option's value is not a positional word (`-o build` names a
+    // directory, not the build command).
+    static constexpr std::string_view kTakesValue[] = { "-o", "--output-dir", "--engine",
+        "--engine-program", "--engine-opt", "--tools", "--max-passes", "--timeout", "--format",
+        "--config", "--interval-ms" };
+    auto firstNonFlag = args.end();
+    for (auto it = args.begin(); it != args.end(); ++it) {
+        if (!it->starts_with('-')) {
+            firstNonFlag = it;
+            break;
+        }
+        if (std::ranges::find(kTakesValue, *it) != std::ranges::end(kTakesValue) && it + 1 != args.end())
+            ++it; // skip the value
+    }
     if (firstNonFlag != args.end() && isSubcommand(*firstNonFlag)) {
         auto sub = std::move(*firstNonFlag);
         args.erase(firstNonFlag);

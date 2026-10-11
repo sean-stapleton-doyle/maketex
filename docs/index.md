@@ -14,9 +14,12 @@ Building: the core library always builds; `MAKETEX_BUILD_CLI`,
 default to ON only when maketex is the top-level CMake project, so embedding
 consumers get just the library (and only its two dependencies).
 
-Testing: `ctest --test-dir build -LE integration` runs the unit tests;
-`ctest --test-dir build -L integration` builds every `testdata/` fixture with
-the real TeX engines. A fixture whose engine, tool, or package is not
+Testing: `ctest --test-dir build -LE "integration|e2e"` runs the unit
+tests; `ctest --test-dir build -L integration` builds every `testdata/`
+fixture with the real TeX engines through the library; and
+`ctest --test-dir build -L e2e` runs the `maketex` binary itself —
+arguments, exit codes, output formats, `watch`, and package installs (with a
+fake `tlmgr`). A fixture whose engine, tool, or package is not
 installed is reported as *Skipped* with the missing names (a BasicTeX install
 skips several); CI installs a full TeX Live so all of them run.
 

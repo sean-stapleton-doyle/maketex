@@ -8,6 +8,31 @@ AddressSanitizer and UndefinedBehaviorSanitizer. This plan covers the code
 those tests never run. Each gap is ranked by how likely it is to hide a
 wrong result, and each comes with the seam that makes it testable.
 
+## Progress
+
+- **End-to-end suite** (`test/e2e/`, CTest label `e2e`): runs the real
+  `maketex` binary through `CliRunner` (args, working directory, isolated
+  `HOME`/cache, exit code, stdout, stderr) with a `FakeToolchain` of stub
+  programs on `PATH`. It covers:
+  - document discovery, `% !TEX root`, and the optional `.tex`;
+  - exit codes 0, 1, 2, and 3;
+  - JSON and GitHub output, `-o`, `maketex.toml`, and `--timeout`;
+  - `watch --no-tui` rebuilding on an edit and on a missing `\input`
+    appearing;
+  - package installs with a fake `tlmgr` (writable tree, root-owned tree,
+    `--no-install-missing`, `doctor --install-missing`);
+  - paths with spaces and non-ASCII characters;
+  - moved and copied projects.
+
+  Its first run found four bugs, all fixed:
+  - `-o build` was read as the `build` command;
+  - moving a project reset its state, because the fingerprint held the
+    document's directory;
+  - `watch --no-tui` output piped to another program arrived only at exit;
+  - a missing program cost a `tlmgr search` round trip on every build.
+- This covers work item 3's CLI half and much of work item 4 (exit codes,
+  JSON on failure). The `FakeToolchain` seam is built.
+
 ## How the gaps were found
 
 Every new or changed code path was checked for a test that references it.
@@ -67,6 +92,24 @@ Priorities: **P0** — wrong output or a broken feature can ship unnoticed.
 | 10 | P2 | `tlmgrLookup` parsing and its cache, and `detectDistribution` for MiKTeX, Debian, and Fedora. | A fake `tlmgr` printing real `search --global --file` output; assert the parsed package and that the cache file answers a second lookup without running `tlmgr`. Fake `kpsewhich --version` / `TEXMFROOT` answers for each distribution. | `FakeToolchain`; cache directory under the temp dir. |
 | 11 | P2 | Smaller paths: the xelatex retry (only the lualatex retry is tested), the 20,000-entry and `node_modules` limits in `mirrorSourceDirectories`, publishing an unchanged PDF without touching its mtime, the watch loop's engine pinning and missing-file watching. | One focused test each. Watch: drive `watchLoop` with a stop token and a fake build function. | Exposed `mirrorSourceDirectories`; for watch, inject the build function into `watchLoop`. |
 | 12 | P2 | The "source saved mid-pass" check on coarse-timestamp filesystems (1 s HFS+, 2 s FAT) is only tested on APFS with fakes. | Document the limit and test that an edit in the same second never causes an endless rebuild. Making the check timestamp-independent would need a pre-pass hash and is a design change, not a test. | `FakeEngine` that sets mtimes explicitly. |
+
+## End-to-end scenarios still to write
+
+- `clean`: keeps the PDF; `--all` removes `.maketex/`; a shared output
+  directory; `-o .` keeps a hand-written `.ist`; `--dry-run` deletes nothing.
+- `watch`: a save during a build triggers another build; quitting while a
+  pass runs leaves no TeX process behind; the TUI (needs a pseudo-terminal).
+- The sudo confirmation (`[Y/n]`) under a pseudo-terminal, answered yes
+  and no.
+- Incremental: editing a figure; a new `\section` in a TOC document; a
+  prose edit in an `\include`d chapter; a new `\index` entry; deleting the
+  published PDF (republished without a rebuild) and `.maketex/` (one full
+  rebuild).
+- Two `maketex` processes building one document at once.
+- Removing biblatex from a document stops biber runs.
+- Failure fixtures: minted without `--shell-escape`, biblatex without
+  biber, oscillating references (the pass limit), a missing
+  `\includegraphics` file, a missing glyph.
 
 ## Order of work
 

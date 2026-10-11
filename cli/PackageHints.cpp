@@ -181,8 +181,12 @@ PackageLookup tlmgrLookup(fs::path cacheDir)
             cache = nlohmann::json::parse(in, nullptr, /*allow_exceptions=*/false);
             if (!cache.is_object())
                 cache = nlohmann::json::object();
-            if (auto it = cache.find(file); it != cache.end() && it->is_string())
-                return it->get<std::string>();
+            if (auto it = cache.find(file); it != cache.end()) {
+                if (it->is_string())
+                    return it->get<std::string>();
+                if (it->is_null())
+                    return std::nullopt; // looked up before: no package has it
+            }
         }
 
         // Output: a "tlmgr: package repository …" line, then each package
@@ -200,8 +204,11 @@ PackageLookup tlmgrLookup(fs::path cacheDir)
                 package = std::string(line.substr(0, line.size() - 1));
             rest = nl == std::string_view::npos ? std::string_view { } : rest.substr(nl + 1);
         }
-        if (package && !cacheFile.empty()) {
-            cache[file] = *package;
+        // tlmgr answered (it was reachable): remember the result either way,
+        // so a program no package provides (pygmentize) costs one network
+        // round trip, not one per build. An unreachable tlmgr caches nothing.
+        if (!cacheFile.empty()) {
+            cache[file] = package ? nlohmann::json(*package) : nlohmann::json(nullptr);
             std::error_code ec;
             fs::create_directories(cacheDir, ec);
             std::ofstream(cacheFile) << cache.dump(2);
