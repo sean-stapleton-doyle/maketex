@@ -107,19 +107,25 @@ On TeX Live (including MacTeX and BasicTeX), maketex asks
 answer in `~/.cache/maketex/`. Debian, Fedora, and MiKTeX installs get
 `apt`, `dnf`, and `miktex` commands instead.
 
-To have maketex install them for you, pass `--install-missing` (or set
-`install-missing = true`). After a build fails for a missing package or
-tool, maketex runs `tlmgr install` and builds again, round after round,
-because TeX stops at the first missing package. This works on TeX Live
-only. How `tlmgr` runs depends on who owns the TeX tree:
+By default, maketex also installs them for you. After a build fails for a
+missing package or tool, it runs `tlmgr install` and builds again, round
+after round, because TeX stops at the first missing package. This works on
+TeX Live only; on other distributions you get the hint. How `tlmgr` runs
+depends on who owns the TeX tree:
 
-- If your user can write to the tree, maketex runs `tlmgr` directly.
+- If your user can write to the tree, maketex installs without asking.
 - If root owns the tree (the MacTeX and BasicTeX default), a plain
-  `maketex` build on a terminal runs `sudo tlmgr`, which asks for your
-  password. In `watch`, CI, or with `--format=json`/`github`, maketex never
-  prompts; it prints the command to run instead. To make installs work
-  everywhere without a password, take ownership of the tree once:
-  `sudo chown -R $(whoami) /usr/local/texlive/<year>`.
+  `maketex` build on a terminal asks first —
+  ``Install with `sudo tlmgr install minted`? [Y/n]`` — then runs `sudo`,
+  which asks for your password. Pass `--install-missing` (or set
+  `install-missing = true`) to skip the question.
+- In `watch`, CI, or with `--format=json`/`github`, maketex never prompts:
+  with a root-owned tree it leaves the install to you and prints the
+  command.
+
+To make installs work everywhere without a password, take ownership of the
+tree once: `sudo chown -R $(whoami) /usr/local/texlive/<year>`. To turn
+installs off, pass `--no-install-missing` or set `install-missing = false`.
 
 Documents that run external programs (minted, svg) need `--shell-escape`.
 maketex never turns it on by itself, because it lets the document run
@@ -140,7 +146,7 @@ arbitrary commands; the error tells you to add the flag.
 | `--halt-on-error` / `--no-halt-on-error` | stop at the first TeX error (default on) |
 | `--max-passes <n>` | give up if not converged after n passes (default 8) |
 | `--timeout <seconds>` | stop any engine or tool run that takes longer (default: no limit) |
-| `--install-missing` / `--no-install-missing` | install missing packages and tools with `tlmgr`, then rebuild (default off) |
+| `--install-missing` / `--no-install-missing` | install missing packages and tools with `tlmgr`, then rebuild (default on; explicit `--install-missing` skips the sudo confirmation) |
 | `-v`, `--verbose` | show raw log context under each diagnostic |
 | `--plain` | plain text output even on a terminal |
 | `--config <path>` / `--no-config` | use exactly this config file / ignore config files |

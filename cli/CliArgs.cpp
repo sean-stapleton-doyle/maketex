@@ -45,10 +45,11 @@ namespace {
     {
         sub.add_flag_callback(
             "--install-missing", [&out] { out.installMissing = true; },
-            "Install missing packages and tools with tlmgr, then rebuild");
+            "Install missing packages and tools with tlmgr, then rebuild (default; "
+            "asks before using sudo unless given explicitly)");
         sub.add_flag_callback(
             "--no-install-missing", [&out] { out.installMissing = false; },
-            "Only suggest the install command (default)");
+            "Only suggest the install command");
     }
 
     // Options accepted by build and watch alike, bound straight into out.
