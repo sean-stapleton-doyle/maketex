@@ -53,7 +53,7 @@ namespace {
         if (flag.empty())
             return { };
         try {
-            auto r = Process({ program.string(), std::string(flag) }).wait({ .timeout = 5s });
+            auto r = Process(std::vector<std::string> { program.string(), std::string(flag) }).wait({ .timeout = 5s });
             return firstLine(r.stdoutOutput.empty() ? r.stderrOutput : r.stdoutOutput);
         } catch (const std::system_error&) {
             return { };

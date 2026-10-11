@@ -60,7 +60,7 @@ namespace {
     std::optional<fs::path> texmfRoot()
     {
         try {
-            auto r = Process({ "kpsewhich", "-var-value=TEXMFROOT" }).wait({ .timeout = std::chrono::seconds(5) });
+            auto r = Process(std::vector<std::string> { "kpsewhich", "-var-value=TEXMFROOT" }).wait({ .timeout = std::chrono::seconds(5) });
             auto root = r.stdoutOutput;
             while (!root.empty() && (root.back() == '\n' || root.back() == '\r'))
                 root.pop_back();

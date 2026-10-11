@@ -79,7 +79,7 @@ bool hasProgram(const std::string& program)
 bool hasTexFile(const std::string& file)
 {
     try {
-        auto result = Process({ "kpsewhich", file }).wait();
+        auto result = Process(std::vector<std::string> { "kpsewhich", file }).wait();
         return result.exitCode == 0 && !result.stdoutOutput.empty();
     } catch (const std::system_error&) {
         return false;

@@ -64,6 +64,6 @@ TEST_F(FailureModesTest, stoppedBuildExitsWithTheSignalAndLeavesNoEngine)
 
     EXPECT_EQ(result.exitCode, 128 + SIGTERM);
     std::this_thread::sleep_for(std::chrono::milliseconds(500));
-    auto left = maketex::Process({ "pgrep", "-f", dir.filename().string() }).wait();
+    auto left = maketex::Process(std::vector<std::string> { "pgrep", "-f", dir.filename().string() }).wait();
     EXPECT_NE(left.exitCode, 0) << "engine still running: " << left.stdoutOutput;
 }
