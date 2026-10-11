@@ -9,10 +9,10 @@
 - [Implementation Progress](implementation_progress.md) — what is built, what remains
 - [Next up](next-up.md) — known gaps and the backlog
 
-Building: the core library always builds; `MAKETEX_BUILD_CLI`,
-`MAKETEX_BUILD_HARNESS`, and `MAKETEX_BUILD_TESTS` control the rest and
-default to ON only when maketex is the top-level CMake project, so embedding
-consumers get just the library (and only its two dependencies).
+Building: the core library always builds; `MAKETEX_BUILD_CLI` and
+`MAKETEX_BUILD_TESTS` control the rest and default to ON only when maketex
+is the top-level CMake project, so embedding consumers get just the library
+(and only its two dependencies).
 
 Testing: `ctest --test-dir build -LE "integration|e2e"` runs the unit
 tests; `ctest --test-dir build -L integration` builds every `testdata/`

@@ -10,7 +10,6 @@ set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 # Everything beyond the core library defaults off when maketex is consumed by
 # another project (add_subdirectory / CPM / FetchContent).
 option(MAKETEX_BUILD_CLI "Build the maketex command line interface" ${PROJECT_IS_TOP_LEVEL})
-option(MAKETEX_BUILD_HARNESS "Build the end-to-end test harness" ${PROJECT_IS_TOP_LEVEL})
 option(MAKETEX_BUILD_TESTS "Build the maketex tests" ${PROJECT_IS_TOP_LEVEL})
 
 if(PROJECT_IS_TOP_LEVEL)
@@ -127,14 +126,6 @@ target_compile_definitions(maketex PRIVATE
 
 target_link_libraries(maketex PRIVATE $<BUILD_INTERFACE:maketex_build_settings>)
 
-# ── End-to-end harness (not the CLI; see cli/) ───────────────────────────────
-if(MAKETEX_BUILD_HARNESS)
-    add_executable(maketex_cli apps/main.cpp)
-    set_target_properties(maketex_cli PROPERTIES OUTPUT_NAME maketex-harness)
-
-    target_link_libraries(maketex_cli PRIVATE maketex::maketex maketex_build_settings)
-endif()
-
 # ── Command line interface ────────────────────────────────────────────────────
 if(MAKETEX_BUILD_CLI OR MAKETEX_BUILD_TESTS)
     add_subdirectory(cli)
@@ -147,7 +138,6 @@ if(CLANG_FORMAT AND PROJECT_IS_TOP_LEVEL)
         ${CMAKE_SOURCE_DIR}/src/*.cpp
         ${CMAKE_SOURCE_DIR}/src/*.h
         ${CMAKE_SOURCE_DIR}/include/*.h
-        ${CMAKE_SOURCE_DIR}/apps/*.cpp
         ${CMAKE_SOURCE_DIR}/cli/*.cpp
         ${CMAKE_SOURCE_DIR}/cli/*.h
         ${CMAKE_SOURCE_DIR}/test/*.cpp
