@@ -78,6 +78,40 @@ if(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
     endif()
 endif()
 
+# ── Toolchain probes ──────────────────────────────────────────────────────────
+# Supported toolchains differ in what they ship by default; probe instead of
+# assuming the newest.
+include(CheckSymbolExists)
+include(CheckCXXSourceCompiles)
+
+# macOS SDKs before 26 have only the _np spelling.
+check_symbol_exists(posix_spawn_file_actions_addchdir "spawn.h"
+    MAKETEX_HAVE_SPAWN_ADDCHDIR)
+
+# std::stop_token / std::jthread: libc++ before 20 (Xcode 16) ships them only
+# behind -fexperimental-library.
+set(MAKETEX_STOP_TOKEN_PROBE "
+#include <stop_token>
+#include <thread>
+int main() { std::stop_source s; std::jthread t([](std::stop_token) { }); return s.stop_requested(); }
+")
+# Probes compile without the project's -std= flag unless told.
+set(MAKETEX_STD_FLAG "${CMAKE_CXX${CMAKE_CXX_STANDARD}_STANDARD_COMPILE_OPTION}")
+set(CMAKE_REQUIRED_FLAGS "${MAKETEX_STD_FLAG}")
+check_cxx_source_compiles("${MAKETEX_STOP_TOKEN_PROBE}" MAKETEX_STOP_TOKEN_NATIVE)
+set(MAKETEX_NEEDS_EXPERIMENTAL_LIBRARY OFF)
+if(NOT MAKETEX_STOP_TOKEN_NATIVE)
+    set(CMAKE_REQUIRED_FLAGS "${MAKETEX_STD_FLAG} -fexperimental-library")
+    set(CMAKE_REQUIRED_LINK_OPTIONS -fexperimental-library)
+    check_cxx_source_compiles("${MAKETEX_STOP_TOKEN_PROBE}" MAKETEX_STOP_TOKEN_EXPERIMENTAL)
+    unset(CMAKE_REQUIRED_LINK_OPTIONS)
+    if(NOT MAKETEX_STOP_TOKEN_EXPERIMENTAL)
+        message(FATAL_ERROR "maketex needs std::stop_token and std::jthread (C++20)")
+    endif()
+    set(MAKETEX_NEEDS_EXPERIMENTAL_LIBRARY ON)
+endif()
+unset(CMAKE_REQUIRED_FLAGS)
+
 # ── Core library (shared by executable and tests) ─────────────────────────────
 add_library(maketex STATIC
     src/StateDatabase.cpp
@@ -122,7 +156,13 @@ target_link_libraries(maketex PUBLIC
 # state database's informational meta row.
 target_compile_definitions(maketex PRIVATE
     MAKETEX_VERSION="${PROJECT_VERSION}"
+    $<$<BOOL:${MAKETEX_HAVE_SPAWN_ADDCHDIR}>:MAKETEX_HAVE_SPAWN_ADDCHDIR>
 )
+# Public: Process.h exposes std::stop_token, so consumers need it too.
+if(MAKETEX_NEEDS_EXPERIMENTAL_LIBRARY)
+    target_compile_options(maketex PUBLIC -fexperimental-library)
+    target_link_options(maketex PUBLIC -fexperimental-library)
+endif()
 
 target_link_libraries(maketex PRIVATE $<BUILD_INTERFACE:maketex_build_settings>)
 

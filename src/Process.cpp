@@ -61,8 +61,13 @@ Process::Process(std::span<const std::string> argv,
 
     posix_spawn_file_actions_t fa;
     posix_spawn_file_actions_init(&fa);
-    if (!workingDir.empty())
+    if (!workingDir.empty()) {
+#ifdef MAKETEX_HAVE_SPAWN_ADDCHDIR
         posix_spawn_file_actions_addchdir(&fa, workingDir.c_str());
+#else
+        posix_spawn_file_actions_addchdir_np(&fa, workingDir.c_str());
+#endif
+    }
     posix_spawn_file_actions_addopen(&fa, STDIN_FILENO, "/dev/null", O_RDONLY, 0);
     posix_spawn_file_actions_adddup2(&fa, pOut[1], STDOUT_FILENO);
     posix_spawn_file_actions_adddup2(&fa, pErr[1], STDERR_FILENO);
