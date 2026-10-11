@@ -313,3 +313,41 @@ TEST_F(DocumentDiscoveryTest, texRootCommentRedirectsToTheRoot)
     ASSERT_TRUE(found.has_value()) << found.error();
     EXPECT_EQ(fs::weakly_canonical(*found), fs::weakly_canonical(m_dir / "thesis.tex"));
 }
+
+// ── install-missing resolution ───────────────────────────────────────────────
+
+TEST_F(EffectiveOptionsTest, installMissingIsOnByDefaultButNotRequested)
+{
+    auto options = assembleOptions(argsWithFile(), std::nullopt);
+    ASSERT_TRUE(options.has_value()) << options.error();
+    EXPECT_TRUE(options->extras.installMissing);
+    // Not requested: sudo installs are confirmed, doctor doesn't install.
+    EXPECT_FALSE(options->extras.installMissingRequested);
+}
+
+TEST_F(EffectiveOptionsTest, installMissingFlagOrConfigIsARequest)
+{
+    auto args = argsWithFile();
+    args.installMissing = true;
+    auto fromFlag = assembleOptions(args, std::nullopt);
+    ASSERT_TRUE(fromFlag.has_value());
+    EXPECT_TRUE(fromFlag->extras.installMissingRequested);
+
+    Config config;
+    config.installMissing = true;
+    auto fromConfig = assembleOptions(argsWithFile(), config);
+    ASSERT_TRUE(fromConfig.has_value());
+    EXPECT_TRUE(fromConfig->extras.installMissingRequested);
+}
+
+TEST_F(EffectiveOptionsTest, noInstallMissingTurnsItOff)
+{
+    auto args = argsWithFile();
+    args.installMissing = false;
+    Config config;
+    config.installMissing = true; // the flag wins over the config
+    auto options = assembleOptions(args, config);
+    ASSERT_TRUE(options.has_value());
+    EXPECT_FALSE(options->extras.installMissing);
+    EXPECT_FALSE(options->extras.installMissingRequested);
+}

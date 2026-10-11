@@ -71,9 +71,13 @@ int runBuildCommand(const EffectiveOptions& options)
         if (options.extras.installMissing) {
             // Prompting for a sudo password is only fair on a terminal and
             // with human output (machine formats own stdout).
-            bool interactive = options.extras.format == OutputFormat::Human
-                && ::isatty(STDIN_FILENO) && ::isatty(STDERR_FILENO);
-            result = buildInstallingMissing(options.build, interactive, std::cerr);
+            InstallPolicy policy {
+                .interactive = options.extras.format == OutputFormat::Human
+                    && ::isatty(STDIN_FILENO) && ::isatty(STDERR_FILENO),
+                .requested = options.extras.installMissingRequested,
+                .confirm = askOnTerminal,
+            };
+            result = buildInstallingMissing(options.build, policy, std::cerr);
         } else {
             result = runBuild(options.build);
         }

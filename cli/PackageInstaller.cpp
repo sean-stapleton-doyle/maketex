@@ -5,6 +5,7 @@
 #include <algorithm>
 #include <cerrno>
 #include <format>
+#include <iostream>
 #include <set>
 #include <spawn.h>
 #include <sys/wait.h>
@@ -131,7 +132,17 @@ bool installPackages(const std::vector<std::string>& packages,
     }
 }
 
-BuildResult buildInstallingMissing(const BuildOptions& options, bool interactive, std::ostream& log)
+bool askOnTerminal(const std::string& question)
+{
+    std::cerr << question << " [Y/n] " << std::flush;
+    std::string answer;
+    if (!std::getline(std::cin, answer))
+        return false;
+    return answer.empty() || answer.front() == 'y' || answer.front() == 'Y';
+}
+
+BuildResult buildInstallingMissing(const BuildOptions& options, const InstallPolicy& policy,
+    std::ostream& log)
 {
     std::vector<Diagnostic> notes;
     std::set<std::string> attempted;
@@ -156,15 +167,24 @@ BuildResult buildInstallingMissing(const BuildOptions& options, bool interactive
             break;
 
         if (!capability)
-            capability = installCapability(*distro, interactive);
+            capability = installCapability(*distro, policy.interactive);
         if (capability->access == InstallCapability::Access::Unavailable) {
-            notes.push_back(Diagnostic {
-                .severity = Diagnostic::Severity::Info,
-                .message = std::format("--install-missing could not install {}: {}",
-                    joined(plan.packages), capability->reason),
-                .category = "install",
-            });
+            if (policy.requested)
+                notes.push_back(Diagnostic {
+                    .severity = Diagnostic::Severity::Info,
+                    .message = std::format("--install-missing could not install {}: {}",
+                        joined(plan.packages), capability->reason),
+                    .category = "install",
+                });
             break;
+        }
+        // Installing by default must not spring a password prompt on
+        // someone who never asked: say what is about to happen first.
+        if (capability->access == InstallCapability::Access::Sudo && !policy.requested) {
+            auto question = std::format("maketex: {} {} not installed. Install with `sudo tlmgr install {}`?",
+                joined(plan.packages), plan.packages.size() == 1 ? "is" : "are", joined(plan.packages));
+            if (!policy.confirm || !policy.confirm(question))
+                break;
         }
         for (const auto& p : plan.packages)
             attempted.insert(p);

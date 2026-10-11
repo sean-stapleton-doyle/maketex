@@ -77,8 +77,9 @@ max-passes = 8
 timeout = 300
 
 # Install missing packages and tools with tlmgr, then rebuild. See USAGE.md,
-# "Missing packages and programs". Default: false.
-install-missing = false
+# "Missing packages and programs". Default: true, asking before using sudo;
+# setting it to true explicitly skips that question.
+install-missing = true
 
 [engine-args]
 # Executable to spawn instead of the engine's default binary name.

@@ -29,8 +29,12 @@ struct CliExtras {
     bool cleanAll = false;
     bool dryRun = false;
     bool noTui = false;
-    // Run tlmgr for missing packages and rebuild (opt-in).
-    bool installMissing = false;
+    // Run tlmgr for missing packages and rebuild. On by default.
+    bool installMissing = true;
+    // Set by --install-missing or the config key, as opposed to the
+    // default — decides whether sudo installs are confirmed first, and
+    // whether doctor installs at all.
+    bool installMissingRequested = false;
 };
 
 struct EffectiveOptions {

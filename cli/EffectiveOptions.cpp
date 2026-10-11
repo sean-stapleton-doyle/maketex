@@ -187,6 +187,8 @@ std::expected<EffectiveOptions, std::string> assembleOptions(
     out.extras.noTui = args.noTui;
     merge(out.extras.installMissing, args.installMissing,
         config ? config->installMissing : std::nullopt);
+    out.extras.installMissingRequested = out.extras.installMissing
+        && (args.installMissing || (config && config->installMissing));
 
     // The engine refuses to write into a missing -output-directory, and the
     // state database needs it to exist too. Clean must not create anything.

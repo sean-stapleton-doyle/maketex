@@ -66,7 +66,9 @@ namespace {
                 // only into a user-writable tree; otherwise a note says why.
                 std::ostringstream installLog;
                 result = options.extras.installMissing
-                    ? buildInstallingMissing(build, /*interactive=*/false, installLog)
+                    ? buildInstallingMissing(build,
+                          InstallPolicy { .requested = options.extras.installMissingRequested },
+                          installLog)
                     : runBuild(build);
                 addInstallHints(result.diagnostics);
                 // Don't pay for the failing pdflatex attempt on every save.

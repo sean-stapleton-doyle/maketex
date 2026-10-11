@@ -183,11 +183,11 @@ int runDoctorCommand(const EffectiveOptions& options)
         auto capability = installCapability(distro, interactive);
         switch (capability.access) {
         case InstallCapability::Access::Direct:
-            report.ok("package installs", "tlmgr can install into the TeX tree (--install-missing works)");
+            report.ok("package installs", "tlmgr can install into the TeX tree; builds install missing packages");
             break;
         case InstallCapability::Access::Sudo:
             report.info("package installs",
-                "--install-missing will ask for your password: " + capability.reason);
+                "builds ask before installing with sudo: " + capability.reason);
             break;
         case InstallCapability::Access::Unavailable:
             report.info("package installs", capability.reason);
@@ -253,7 +253,8 @@ int runDoctorCommand(const EffectiveOptions& options)
                                             : " (" + engine.reason + ")"));
 
         auto gaps = documentGaps(*req);
-        if (options.extras.installMissing && !gaps.empty()) {
+        // doctor diagnoses; it installs only when asked explicitly.
+        if (options.extras.installMissingRequested && !gaps.empty()) {
             auto plan = planInstall(gaps, lookup);
             auto capability = installCapability(distro, interactive);
             if (!plan.packages.empty() && capability.access != InstallCapability::Access::Unavailable
