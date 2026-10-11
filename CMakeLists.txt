@@ -70,6 +70,13 @@ add_library(maketex_build_settings INTERFACE)
 if(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
     target_compile_options(maketex_build_settings INTERFACE
         -Wall -Wextra -Wpedantic -Wshadow -Wconversion)
+    # The code relies on designated initializers leaving members at their
+    # defaults (`WaitLimits { .timeout = 5s }`); GCC's -Wextra flags every
+    # such omission, Clang (rightly) does not.
+    if(CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
+        target_compile_options(maketex_build_settings INTERFACE
+            -Wno-missing-field-initializers)
+    endif()
     if(MAKETEX_SANITIZE)
         target_compile_options(maketex_build_settings INTERFACE
             -fsanitize=${MAKETEX_SANITIZE} -fno-omit-frame-pointer)

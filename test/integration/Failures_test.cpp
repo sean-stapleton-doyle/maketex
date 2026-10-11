@@ -139,16 +139,17 @@ TEST_P(FailureFixtureTest, reportsTheDocumentedDiagnostic)
     EXPECT_EQ(it->category, c.category) << it->message;
     EXPECT_EQ(it->file, c.file) << it->message;
     EXPECT_EQ(it->line, c.line) << it->message;
-    if (!c.messageContains.empty())
+    if (!c.messageContains.empty()) {
         EXPECT_NE(it->message.find(c.messageContains), std::string::npos) << it->message;
+    }
     // A failure is explained by real errors, not the "Emergency stop" echo.
     for (const auto& d : run.result.diagnostics)
         EXPECT_FALSE(d.message.starts_with("Emergency stop")) << d.message;
 }
 
 INSTANTIATE_TEST_SUITE_P(Failures, FailureFixtureTest, ::testing::ValuesIn(kFailures),
-    [](const auto& info) {
-        auto name = info.param.name;
+    [](const auto& testParam) {
+        auto name = testParam.param.name;
         std::ranges::replace(name, '-', '_');
         return name;
     });
