@@ -331,8 +331,8 @@ TEST_F(IncrementalTest, documentsSharingADirectoryKeepTheirState)
 }
 
 INSTANTIATE_TEST_SUITE_P(Testdata, FixtureTest, ::testing::ValuesIn(kCases),
-    [](const auto& info) {
-        auto name = info.param.name;
+    [](const auto& testParam) {
+        auto name = testParam.param.name;
         std::ranges::replace(name, '-', '_');
         return name;
     });
