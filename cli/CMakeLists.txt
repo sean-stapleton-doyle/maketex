@@ -7,6 +7,7 @@ add_library(maketex_cli_core STATIC
     FileWatcher.cpp
     PackageHints.cpp
     PackageInstaller.cpp
+    SignalStop.cpp
     commands/DoctorCommand.cpp
     render/InlineReport.cpp
     render/JsonReport.cpp

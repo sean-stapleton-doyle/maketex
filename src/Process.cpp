@@ -69,11 +69,24 @@ Process::Process(std::span<const std::string> argv,
 
     posix_spawnattr_t attr;
     posix_spawnattr_init(&attr);
+    // The child starts with nothing blocked and default dispositions, even
+    // when this process blocks signals to handle them on its own thread —
+    // otherwise TeX would inherit the mask and ignore our SIGTERM.
+    sigset_t noSignals;
+    sigemptyset(&noSignals);
+    posix_spawnattr_setsigmask(&attr, &noSignals);
+    sigset_t defaults;
+    sigemptyset(&defaults);
+    for (int sig : { SIGINT, SIGTERM, SIGHUP, SIGPIPE, SIGUSR1 })
+        sigaddset(&defaults, sig);
+    posix_spawnattr_setsigdefault(&attr, &defaults);
+    short flags = POSIX_SPAWN_SETSIGMASK | POSIX_SPAWN_SETSIGDEF;
 #ifdef POSIX_SPAWN_CLOEXEC_DEFAULT
     // macOS: the child gets only the descriptors set up above, never one
     // the parent happens to hold (the state database, a watched file).
-    posix_spawnattr_setflags(&attr, POSIX_SPAWN_CLOEXEC_DEFAULT);
+    flags |= POSIX_SPAWN_CLOEXEC_DEFAULT;
 #endif
+    posix_spawnattr_setflags(&attr, flags);
 
     std::vector<char*> cargv;
     cargv.reserve(argv.size() + 1);

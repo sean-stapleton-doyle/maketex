@@ -93,23 +93,28 @@ Priorities: **P0** — wrong output or a broken feature can ship unnoticed.
 | 11 | P2 | Smaller paths: the xelatex retry (only the lualatex retry is tested), the 20,000-entry and `node_modules` limits in `mirrorSourceDirectories`, publishing an unchanged PDF without touching its mtime, the watch loop's engine pinning and missing-file watching. | One focused test each. Watch: drive `watchLoop` with a stop token and a fake build function. | Exposed `mirrorSourceDirectories`; for watch, inject the build function into `watchLoop`. |
 | 12 | P2 | The "source saved mid-pass" check on coarse-timestamp filesystems (1 s HFS+, 2 s FAT) is only tested on APFS with fakes. | Document the limit and test that an edit in the same second never causes an endless rebuild. Making the check timestamp-independent would need a pre-pass hash and is a design change, not a test. | `FakeEngine` that sets mtimes explicitly. |
 
+Second batch, also done: `clean` (default, `--all`, `--dry-run`, a shared
+output directory, `-o .`), incremental edits (a figure, a new TOC section,
+a chapter, an `\index` entry, a deleted PDF or `.maketex/`), two concurrent
+builds, a save during a build, stopping `watch` or a build with SIGTERM, the
+sudo confirmation answered on a pseudo-terminal (`CliRunner::runInTerminal`),
+a document that never converges, and a missing figure. It found two more
+bugs, both fixed:
+- stopping maketex left the TeX engine running (no signal handling; a
+  looping document's pdflatex ran forever);
+- a cold build stopped after one pass even when the new `.aux` held a
+  package's own data, which nothing warns about; the next run then claimed
+  "up to date".
+
 ## End-to-end scenarios still to write
 
-- `clean`: keeps the PDF; `--all` removes `.maketex/`; a shared output
-  directory; `-o .` keeps a hand-written `.ist`; `--dry-run` deletes nothing.
-- `watch`: a save during a build triggers another build; quitting while a
-  pass runs leaves no TeX process behind; the TUI (needs a pseudo-terminal).
-- The sudo confirmation (`[Y/n]`) under a pseudo-terminal, answered yes
-  and no.
-- Incremental: editing a figure; a new `\section` in a TOC document; a
-  prose edit in an `\include`d chapter; a new `\index` entry; deleting the
-  published PDF (republished without a rebuild) and `.maketex/` (one full
-  rebuild).
-- Two `maketex` processes building one document at once.
-- Removing biblatex from a document stops biber runs.
-- Failure fixtures: minted without `--shell-escape`, biblatex without
-  biber, oscillating references (the pass limit), a missing
-  `\includegraphics` file, a missing glyph.
+- The full-screen `watch` interface (needs a pseudo-terminal and screen
+  scraping).
+- Removing biblatex from a document stops biber runs (needs biblatex and
+  biber installed; CI).
+- Failure fixtures that need packages BasicTeX lacks: minted without
+  `--shell-escape`, biblatex without biber.
+- A missing-glyph warning (needs a font without the glyph and xelatex).
 
 ## Order of work
 

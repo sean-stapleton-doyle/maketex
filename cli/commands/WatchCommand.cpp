@@ -170,8 +170,9 @@ namespace {
                 },
         };
 
-        std::stop_source stop;
-        watchLoop(options, watcher, stop.get_token(), callbacks);
+        // Runs until a signal (Ctrl-C, SIGTERM) requests the stop; the build
+        // in progress is cancelled with it.
+        watchLoop(options, watcher, options.build.stopToken, callbacks);
         return 0;
     }
 
@@ -348,6 +349,10 @@ namespace {
             }
             return false;
         });
+
+        // SIGTERM/SIGHUP from outside (Ctrl-C is a key event in the TUI)
+        // closes the screen the same way `q` does, restoring the terminal.
+        std::stop_callback onSignal(options.build.stopToken, [&screen] { screen.Exit(); });
 
         screen.Loop(component);
 

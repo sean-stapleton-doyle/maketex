@@ -175,6 +175,12 @@ Exit codes:
 | `1` | the document did not build (TeX or tool errors, no convergence) |
 | `2` | usage error: bad flag, invalid config, input file not found |
 | `3` | environment error: engine or tool not installed, database or file system trouble |
+| `130`, `143` | stopped by SIGINT (Ctrl-C) or SIGTERM; the running engine or tool is stopped too |
+
+Stopping maketex — Ctrl-C, or SIGTERM from an editor plugin or process
+supervisor — also stops the TeX run or tool it started, so nothing keeps
+running in the background. A second Ctrl-C exits immediately without
+waiting for that cleanup.
 
 With `--format=json`, stdout always carries exactly one JSON document, even
 for exit code 3.

@@ -1,6 +1,7 @@
 #include "CliArgs.h"
 #include "Config.h"
 #include "EffectiveOptions.h"
+#include "SignalStop.h"
 #include "commands/BuildCommand.h"
 #include "commands/CleanCommand.h"
 #include "commands/DoctorCommand.h"
@@ -16,7 +17,7 @@
 namespace fs = std::filesystem;
 using namespace maketex::cli;
 
-static int run(int argc, char* argv[])
+static int run(int argc, char* argv[], std::stop_token stop)
 {
     auto args = normalizeArgv(std::vector<std::string>(argv + 1, argv + argc));
 
@@ -51,6 +52,8 @@ static int run(int argc, char* argv[])
         return kExitUsage;
     }
 
+    options->build.stopToken = stop;
+
     switch (options->command) {
     case Command::Build:
         return runBuildCommand(*options);
@@ -67,7 +70,13 @@ static int run(int argc, char* argv[])
 int main(int argc, char* argv[])
 {
     try {
-        return run(argc, argv);
+        // Before any other thread exists, so every thread inherits the mask.
+        SignalStop signals;
+        int code = run(argc, argv, signals.token());
+        // Stopped by a signal: the shell convention, 128 + signal number.
+        if (int sig = signals.received())
+            return 128 + sig;
+        return code;
     } catch (const std::exception& e) {
         // Spawn failures (latex not installed), database errors, etc.
         std::cerr << "maketex: " << e.what() << "\n";

@@ -23,6 +23,13 @@ struct AuxRecord {
     // when bibtex's output could — unlike the whole file, which LaTeX
     // rewrites with page numbers and labels on every pass.
     std::string bibtexSignature;
+    // The .aux tree holds something no rerun check covers: anything beyond
+    // \relax, labels and table-of-contents entries (LaTeX warns when those
+    // change), bibliography records (the tools key on them), and the
+    // bookkeeping lines of the kernel, hyperref, and babel. Packages that
+    // store their own data there (counters, totals) don't warn, so a pass
+    // that writes such content must be followed by one that reads it.
+    bool hasUncheckedContent = false;
 };
 
 class AuxParser {
