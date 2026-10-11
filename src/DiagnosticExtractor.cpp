@@ -611,10 +611,14 @@ namespace {
 
                 int lineNum = extractInputLine(msg);
                 stripInputLineSuffix(msg);
+                // Categorised before the call: argument evaluation order is
+                // unspecified, and GCC moves msg into the second argument
+                // before evaluating the first.
+                auto category = categorizeWarning(msg);
                 push(Diagnostic {
                          .severity = Diagnostic::Severity::Warning,
                          .line = lineNum,
-                         .category = categorizeWarning(msg),
+                         .category = std::move(category),
                          .rawContext = std::move(rawCtx),
                      },
                     std::move(msg));
