@@ -1,10 +1,15 @@
+<div align="center">
+
 # maketex
 
 [![CI](https://github.com/sean-stapleton-doyle/maketex/actions/workflows/ci.yml/badge.svg)](https://github.com/sean-stapleton-doyle/maketex/actions/workflows/ci.yml)
 [![Release](https://img.shields.io/github/v/release/sean-stapleton-doyle/maketex)](https://github.com/sean-stapleton-doyle/maketex/releases/latest)
 [![License: MIT](https://img.shields.io/github/license/sean-stapleton-doyle/maketex)](LICENSE)
 
+
 A modern, zero-config C++ replacement for `latexmk`. Run `maketex` in a LaTeX project and it finds the root document, picks the right engine, drives auxiliary tools until convergence, hides build clutter in `.maketex/`, installs missing TeX Live packages, and prints clean compiler-style diagnostics.
+
+</div>
 
 ## Quick start
 
