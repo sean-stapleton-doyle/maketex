@@ -24,7 +24,7 @@ brew install sean-stapleton-doyle/tap/maketex
 curl -fsSL https://raw.githubusercontent.com/sean-stapleton-doyle/maketex/main/scripts/install.sh | sh
 ```
 
-Prebuilt tarballs are on [GitHub Releases](https://github.com/sean-stapleton-doyle/maketex/releases). To build from source (C++26, CMake 3.25+):
+Prebuilt `.deb`, `.rpm`, and `.tar.gz` packages are on [GitHub Releases](https://github.com/sean-stapleton-doyle/maketex/releases). To build from source (C++26, CMake 3.25+):
 
 ```sh
 make release && make install PREFIX=/usr/local

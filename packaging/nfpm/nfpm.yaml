@@ -1,0 +1,43 @@
+name: "maketex"
+arch: "${NFPM_ARCH}"
+platform: "linux"
+version: "${NFPM_VERSION}"
+release: "1"
+section: "tex"
+priority: "optional"
+maintainer: "Sean Stapleton Doyle <seanstapletondoyle@gmail.com>"
+description: |
+  A fast, zero-config C++ replacement for latexmk.
+  Discovers the root document and engine, runs auxiliary tools until
+  convergence, hides build clutter in .maketex/, and prints compiler-style
+  diagnostics.
+homepage: "https://github.com/sean-stapleton-doyle/maketex"
+license: "MIT"
+
+contents:
+  - src: "${NFPM_STAGE}/bin/maketex"
+    dst: "/usr/bin/maketex"
+    file_info:
+      mode: 0755
+  - src: "${NFPM_STAGE}/LICENSE"
+    dst: "/usr/share/doc/maketex/LICENSE"
+    file_info:
+      mode: 0644
+  - src: "${NFPM_STAGE}/README.md"
+    dst: "/usr/share/doc/maketex/README.md"
+    file_info:
+      mode: 0644
+
+overrides:
+  deb:
+    suggests:
+      - texlive-latex-base
+      - texlive-xetex
+      - texlive-luatex
+      - biber
+  rpm:
+    suggests:
+      - texlive-latex
+      - texlive-xetex
+      - texlive-luatex
+      - biber

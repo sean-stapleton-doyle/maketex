@@ -1,6 +1,18 @@
 # Packaging & Distribution
 
-Pushing a `v*` tag triggers [`.github/workflows/release.yml`](../.github/workflows/release.yml). It builds release tarballs for `macos-arm64`, `macos-x86_64`, `linux-x86_64`, and `linux-arm64`, writes `SHA256SUMS.txt`, and renders the Homebrew and AUR packages.
+Pushing a `v*` tag triggers [`.github/workflows/release.yml`](../.github/workflows/release.yml). It builds release tarballs for `macos-arm64`, `macos-x86_64`, `linux-x86_64`, and `linux-arm64`, packages `.deb` (Debian/Ubuntu) and `.rpm` (Fedora/RHEL) via [nFPM](../packaging/nfpm/nfpm.yaml), writes `SHA256SUMS.txt`, and renders the Homebrew and AUR packages.
+
+## Debian / Ubuntu (`.deb`) & Fedora (`.rpm`)
+
+Built automatically on every release tag (`amd64`/`x86_64` and `arm64`/`aarch64`) and attached to [GitHub Releases](https://github.com/sean-stapleton-doyle/maketex/releases):
+
+```sh
+# Debian / Ubuntu
+sudo apt install ./maketex_<version>_amd64.deb
+
+# Fedora / RHEL
+sudo dnf install ./maketex-<version>-1.x86_64.rpm
+```
 
 ## Homebrew tap setup
 
