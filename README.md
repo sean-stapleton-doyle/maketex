@@ -4,7 +4,7 @@
 
 [![CI](https://github.com/sean-stapleton-doyle/maketex/actions/workflows/ci.yml/badge.svg)](https://github.com/sean-stapleton-doyle/maketex/actions/workflows/ci.yml)
 [![Release](https://img.shields.io/github/v/release/sean-stapleton-doyle/maketex)](https://github.com/sean-stapleton-doyle/maketex/releases/latest)
-[![License: MIT](https://img.shields.io/github/license/sean-stapleton-doyle/maketex)](LICENSE)
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue)](LICENSE)
 
 A fast, zero-config C++ replacement for `latexmk`. Run `maketex` in any LaTeX folder—no flags or setup needed. See [examples/](examples/) for multi-chapter projects, custom tools, and advanced configs.
 
