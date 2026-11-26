@@ -160,6 +160,8 @@ std::expected<EffectiveOptions, std::string> assembleOptions(
     merge(build.shellEscape, args.shellEscape,
         config ? config->shellEscape : std::nullopt);
     merge(build.synctex, args.synctex, config ? config->synctex : std::nullopt);
+    merge(build.preambleCache, args.preambleCache,
+        config ? config->preambleCache : std::nullopt);
     merge(build.maxPasses, args.maxPasses,
         config ? config->maxPasses : std::nullopt);
     if (build.maxPasses <= 0)

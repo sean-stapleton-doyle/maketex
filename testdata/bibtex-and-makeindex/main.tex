@@ -1,0 +1,33 @@
+% Fixture: bibtex-and-makeindex
+%
+% Purpose: verify parallel execution of independent auxiliary tools (bibtex
+% and makeindex) on a single document.
+%
+% Expected maketex behaviour:
+%   - Engine: pdflatex
+%   - Passes: 3  (latex → [bibtex || makeindex] → latex → latex)
+%   - Aux tools: bibtex, makeindex
+%   - Output: main.pdf
+
+\documentclass{article}
+\usepackage{makeidx}
+\makeindex
+
+\title{BibTeX and Makeindex Parallel Tools Test}
+\author{Test Fixture}
+\date{2026-11-26}
+
+\begin{document}
+
+\maketitle
+
+\section{Introduction}
+Knuth introduced literate programming\index{literate programming} in~\cite{knuth1984literate},
+and \LaTeX{}\index{LaTeX} was documented by Lamport~\cite{lamport1994latex}.
+
+\bibliographystyle{plain}
+\bibliography{refs}
+
+\printindex
+
+\end{document}

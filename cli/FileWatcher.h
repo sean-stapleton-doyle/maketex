@@ -12,9 +12,10 @@
 
 namespace maketex::cli {
 
-// Polls a fixed set of files for mtime/size/existence changes. Watch sets
-// come from the .fls input list and are small, so stat-ing them every
-// interval is cheap and fully portable — latexmk -pvc polls the same way.
+// Watches a fixed set of files for mtime/size/existence changes using native
+// OS file notifications (kqueue on macOS, inotify on Linux) with a periodic
+// stat fallback so save-to-rebuild latency is near-instant while remaining
+// reliable on network filesystems or large watch sets.
 class FileWatcher {
 public:
     struct Entry {
@@ -27,7 +28,7 @@ public:
     };
 
     explicit FileWatcher(std::chrono::milliseconds pollInterval,
-        std::chrono::milliseconds quietPeriod = std::chrono::milliseconds(200));
+        std::chrono::milliseconds quietPeriod = std::chrono::milliseconds(80));
 
     // Paths for which this returns true are never watched — applied after
     // directories are expanded, so a watched directory cannot smuggle in
@@ -70,6 +71,9 @@ private:
     // Sleeps for duration; returns false when woken by stop or nudge.
     bool sleepFor(std::chrono::milliseconds duration, std::stop_token& stopToken);
 
+    // Signals an active native event waiter (if any) to wake immediately.
+    void wakeNativeLocked() noexcept;
+
     std::chrono::milliseconds m_pollInterval;
     std::chrono::milliseconds m_quietPeriod;
     std::vector<std::filesystem::path> m_watchSet;
@@ -78,6 +82,7 @@ private:
     mutable std::mutex m_mutex;
     std::condition_variable_any m_wake;
     bool m_nudged = false;
+    int m_wakeWriteFd = -1;
 };
 
 } // namespace maketex::cli

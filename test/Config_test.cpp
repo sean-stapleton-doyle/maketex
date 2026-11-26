@@ -197,6 +197,7 @@ TEST(ParseConfig, parsesCustomToolsSearchPathsEnvContentFiltersAndDiagnostics)
 {
     auto config = parseConfig(R"(
 jobname = "paper"
+preamble-cache = true
 texinputs = ["styles//", "../common"]
 bibinputs = ["../bib"]
 bstinputs = ["styles"]
@@ -232,6 +233,7 @@ working-dir = "source"
     ASSERT_TRUE(config.has_value()) << config.error();
     EXPECT_TRUE(config->warnings.empty());
     EXPECT_EQ(config->jobName, "paper");
+    EXPECT_EQ(config->preambleCache, true);
     EXPECT_EQ(config->searchPaths.texInputs,
         (std::vector<std::string> { "/project/styles//", "/common" }));
     EXPECT_EQ(config->searchPaths.bibInputs, (std::vector<std::string> { "/bib" }));

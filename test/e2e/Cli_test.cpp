@@ -7,6 +7,7 @@
 
 #include <algorithm>
 #include <chrono>
+#include <thread>
 
 using namespace maketex::e2e;
 namespace fs = std::filesystem;
@@ -349,4 +350,133 @@ TEST_F(CliTest, nomenclBuiltInToolRunsOnNloFile)
     auto warm = m_cli->run({ }, dir);
     EXPECT_EQ(warm.exitCode, 0) << warm.out << warm.err;
     EXPECT_TRUE(contains(warm.out, "up to date")) << warm.out;
+}
+
+TEST_F(CliTest, preambleCacheReusesFmtPreservesLineNumbersAndInvalidatesOnPreambleEdit)
+{
+    auto dir = project("fmtcache");
+    write(dir / "macros.tex", "\\newcommand{\\greeting}{Hello v1}\n");
+    write(dir / "main.tex",
+        "\\documentclass{article}\n"
+        "\\usepackage{amsmath}\n"
+        "\\input{macros}\n"
+        "\\begin{document}\n"
+        "Line 5: \\greeting.\n"
+        "\\end{document}\n");
+
+    auto cold = m_cli->run({ "--preamble-cache" }, dir);
+    ASSERT_EQ(cold.exitCode, 0) << cold.out << cold.err;
+    const fs::path fmt = dir / ".maketex" / "main-preamble.fmt";
+    ASSERT_TRUE(fs::exists(fmt));
+    ASSERT_TRUE(fs::exists(dir / "main.pdf"));
+    auto fmtMtime = fs::last_write_time(fmt);
+
+    auto warm = m_cli->run({ "--preamble-cache" }, dir);
+    EXPECT_EQ(warm.exitCode, 0) << warm.err;
+    EXPECT_TRUE(contains(warm.out, "up to date")) << warm.out;
+
+    // Body-only edit must reuse the cached .fmt without re-dumping it.
+    std::this_thread::sleep_for(std::chrono::milliseconds(20));
+    write(dir / "main.tex",
+        "\\documentclass{article}\n"
+        "\\usepackage{amsmath}\n"
+        "\\input{macros}\n"
+        "\\begin{document}\n"
+        "Line 5 edited: \\greeting.\n"
+        "\\end{document}\n");
+    auto bodyEdit = m_cli->run({ "--preamble-cache" }, dir);
+    EXPECT_EQ(bodyEdit.exitCode, 0) << bodyEdit.out << bodyEdit.err;
+    EXPECT_EQ(fs::last_write_time(fmt), fmtMtime) << ".fmt was unnecessarily re-dumped on body edit";
+
+    // Errors in the body must still point at the exact line in main.tex.
+    write(dir / "main.tex",
+        "\\documentclass{article}\n"
+        "\\usepackage{amsmath}\n"
+        "\\input{macros}\n"
+        "\\begin{document}\n"
+        "Line 5 ok.\n"
+        "Line 6: \\nosuchmacro\n"
+        "\\end{document}\n");
+    auto bad = m_cli->run({ "--preamble-cache" }, dir);
+    EXPECT_EQ(bad.exitCode, 1);
+    EXPECT_TRUE(contains(bad.err, "main.tex:6")) << bad.err;
+
+    // Editing an \input'd preamble file invalidates and re-dumps the .fmt,
+    // even when main.tex itself is untouched since the last successful build.
+    write(dir / "main.tex",
+        "\\documentclass{article}\n"
+        "\\usepackage{amsmath}\n"
+        "\\input{macros}\n"
+        "\\begin{document}\n"
+        "Line 5: \\greeting.\n"
+        "\\end{document}\n");
+    ASSERT_EQ(m_cli->run({ "--preamble-cache" }, dir).exitCode, 0);
+    fmtMtime = fs::last_write_time(fmt);
+
+    std::this_thread::sleep_for(std::chrono::milliseconds(50));
+    write(dir / "macros.tex", "\\newcommand{\\greeting}{Hello v2}\n");
+    auto preambleEdit = m_cli->run({ "--preamble-cache" }, dir);
+    EXPECT_EQ(preambleEdit.exitCode, 0) << preambleEdit.out << preambleEdit.err;
+    EXPECT_FALSE(contains(preambleEdit.out, "up to date")) << preambleEdit.out;
+    EXPECT_NE(fs::last_write_time(fmt), fmtMtime) << ".fmt was not invalidated on macros.tex edit";
+
+    // Clean sweeps the .fmt cache artifacts too.
+    auto cleaned = m_cli->run({ "clean" }, dir);
+    EXPECT_EQ(cleaned.exitCode, 0) << cleaned.err;
+    EXPECT_FALSE(fs::exists(fmt));
+}
+
+TEST_F(CliTest, preambleCacheWorksWithMultiPassDraftAndSpacesInPath)
+{
+    // Combines Stage B cold -draftmode, Stage D .fmt caching, and paths with spaces.
+    auto dir = project("My Cached Paper");
+    write(dir / "main.tex",
+        "\\documentclass{article}\n"
+        "\\usepackage{amsmath}\n"
+        "\\begin{document}\n"
+        "\\tableofcontents\n"
+        "\\section{Intro}\\label{sec:i}\n"
+        "See Section~\\ref{sec:i}.\n"
+        "\\end{document}\n");
+
+    auto cold = m_cli->run({ "--preamble-cache" }, dir);
+    ASSERT_EQ(cold.exitCode, 0) << cold.out << cold.err;
+    EXPECT_TRUE(contains(cold.out, "done in 2 passes")) << cold.out;
+    EXPECT_TRUE(fs::exists(dir / ".maketex" / "main-preamble.fmt"));
+    EXPECT_TRUE(fs::exists(dir / "main.pdf"));
+
+    auto warm = m_cli->run({ "--preamble-cache" }, dir);
+    EXPECT_EQ(warm.exitCode, 0) << warm.out << warm.err;
+    EXPECT_TRUE(contains(warm.out, "up to date")) << warm.out;
+}
+
+TEST_F(CliTest, preambleCacheFallsBackGracefullyOnUnsupportedPreambleOrEngine)
+{
+    // A preamble containing \begin{filecontents*} cannot be safely skipped;
+    // maketex must fall back to a normal build without creating a .fmt.
+    auto dir = project("fmtfallback");
+    write(dir / "main.tex",
+        "\\begin{filecontents*}{note.txt}\n"
+        "From filecontents.\n"
+        "\\end{filecontents*}\n"
+        "\\documentclass{article}\n"
+        "\\begin{document}\n"
+        "Hello.\n"
+        "\\end{document}\n");
+
+    auto res = m_cli->run({ "--preamble-cache" }, dir);
+    ASSERT_EQ(res.exitCode, 0) << res.out << res.err;
+    EXPECT_TRUE(fs::exists(dir / "main.pdf"));
+    EXPECT_TRUE(fs::exists(dir / ".maketex" / "note.txt"));
+    EXPECT_FALSE(fs::exists(dir / ".maketex" / "main-preamble.fmt"));
+
+    // Non-pdflatex engines ignore --preamble-cache gracefully.
+    if (maketex::integration::hasProgram("xelatex")) {
+        auto xeDir = project("fmtxe");
+        write(xeDir / "main.tex", kHello);
+        auto xe = m_cli->run({ "--engine", "xelatex", "--preamble-cache" }, xeDir);
+        ASSERT_EQ(xe.exitCode, 0) << xe.out << xe.err;
+        EXPECT_TRUE(fs::exists(xeDir / "main.pdf"));
+        EXPECT_FALSE(fs::exists(xeDir / ".maketex" / "main-preamble.fmt"));
+    }
 }

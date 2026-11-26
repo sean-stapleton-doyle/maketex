@@ -341,3 +341,34 @@ TEST_F(EngineBaseTest, noPreambleKeepsThePlainInvocation)
     EXPECT_EQ(args.back(), "doc.tex");
     EXPECT_TRUE(std::ranges::none_of(args, [](const std::string& a) { return a.starts_with("-jobname"); }));
 }
+
+TEST_F(EngineBaseTest, draftModeEmitsDraftmodeForPdfLuaAndNoPdfForXe)
+{
+    EngineInvocation inv;
+    inv.texFile = "doc.tex";
+    inv.draftMode = true;
+
+    auto pdfArgs = PdfLatexEngine().buildArgs(inv);
+    EXPECT_NE(std::ranges::find(pdfArgs, "-draftmode"), pdfArgs.end());
+
+    auto luaArgs = LuaLatexEngine().buildArgs(inv);
+    EXPECT_NE(std::ranges::find(luaArgs, "-draftmode"), luaArgs.end());
+
+    auto xeArgs = XeLatexEngine().buildArgs(inv);
+    EXPECT_NE(std::ranges::find(xeArgs, "-no-pdf"), xeArgs.end());
+    EXPECT_EQ(std::ranges::find(xeArgs, "-draftmode"), xeArgs.end());
+}
+
+TEST_F(EngineBaseTest, formatNameAndSkipPreambleEmitFmtAndSkipInvocation)
+{
+    EngineInvocation inv;
+    inv.texFile = "/docs/paper.tex";
+    inv.formatName = "paper-preamble";
+    inv.skipPreamble = true;
+
+    auto args = PdfLatexEngine().buildArgs(inv);
+    EXPECT_NE(std::ranges::find(args, "-fmt=paper-preamble"), args.end());
+    EXPECT_NE(std::ranges::find(args, "-jobname=paper"), args.end());
+    EXPECT_NE(args.back().find("\\maketex@skip"), std::string::npos);
+    EXPECT_NE(args.back().find("\"/docs/paper.tex\""), std::string::npos);
+}

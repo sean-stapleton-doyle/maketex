@@ -100,6 +100,12 @@ namespace {
         sub.add_flag_callback(
             "--no-synctex", [&out] { out.synctex = false; },
             "Skip SyncTeX data");
+        sub.add_flag_callback(
+            "--preamble-cache", [&out] { out.preambleCache = true; },
+            "Cache the compiled preamble as a .fmt format (pdflatex speedup)");
+        sub.add_flag_callback(
+            "--no-preamble-cache", [&out] { out.preambleCache = false; },
+            "Disable precompiled preamble caching (default)");
         sub.add_option("--max-passes", out.maxPasses,
                "Give up after this many engine passes")
             ->check(CLI::PositiveNumber);

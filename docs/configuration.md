@@ -71,6 +71,11 @@ shell-escape = false
 # Generate SyncTeX data. Default: true.
 synctex = true
 
+# Cache the compiled preamble as a TeX format (.fmt) for pdflatex builds to
+# speed up body-only edits (falls back safely if the preamble cannot be dumped).
+# Default: false.
+preamble-cache = false
+
 # Stop at the first TeX error instead of compiling past it. Default: true.
 halt-on-error = true
 
@@ -144,6 +149,7 @@ extra-extensions = [".tikz-cache"]
 | `output-dir` | `-o` / `--output-dir` |
 | `shell-escape` | `--shell-escape` / `--no-shell-escape` |
 | `synctex` | `--synctex` / `--no-synctex` |
+| `preamble-cache` | `--preamble-cache` / `--no-preamble-cache` |
 | `halt-on-error` | `--halt-on-error` / `--no-halt-on-error` |
 | `max-passes` | `--max-passes` |
 | `timeout` | `--timeout` |

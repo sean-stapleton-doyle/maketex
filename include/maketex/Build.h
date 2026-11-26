@@ -104,6 +104,10 @@ struct BuildOptions {
     // On by default: editors use it for source↔PDF jumps, and it costs
     // little. Also keeps `maketex` and `maketex watch` on one fingerprint.
     bool synctex = true;
+    // Cache the compiled preamble as a TeX format (.fmt) for pdflatex builds,
+    // skipping package loading on body-only edits. Falls back transparently to
+    // normal compilation if the preamble cannot be dumped.
+    bool preambleCache = false;
     int maxPasses = BuildDriver::kDefaultMaxPasses;
 
     // Receives progress events (pass/tool start and finish) on the calling

@@ -1,0 +1,30 @@
+% Fixture: xelatex-multipass
+%
+% Purpose: verify XeLaTeX -no-pdf across multiple passes with a single
+% xdvipdfmx conversion after convergence.
+%
+% Expected maketex behaviour:
+%   - Engine: xelatex
+%   - Passes: 2  (xelatex -no-pdf → xelatex -no-pdf → xdvipdfmx)
+%   - Aux tools: xdvipdfmx (once)
+%   - Output: main.pdf
+
+\documentclass{article}
+
+\title{XeLaTeX Multi-Pass Test}
+\author{Test Fixture}
+\date{2026-11-26}
+
+\begin{document}
+
+\maketitle
+\tableofcontents
+
+\section{Introduction}\label{sec:intro}
+This document uses XeLaTeX with a table of contents and cross-references.
+See Section~\ref{sec:details} for details.
+
+\section{Details}\label{sec:details}
+Back to Section~\ref{sec:intro}.
+
+\end{document}

@@ -36,6 +36,7 @@ struct CliArgs {
     std::optional<bool> haltOnError;
     std::optional<bool> shellEscape;
     std::optional<bool> synctex;
+    std::optional<bool> preambleCache;
     std::optional<int> maxPasses;
     std::optional<int> timeoutSeconds;
     std::optional<bool> installMissing;

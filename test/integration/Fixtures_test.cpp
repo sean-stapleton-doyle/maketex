@@ -72,6 +72,11 @@ const std::vector<FixtureCase> kCases = {
         // The index adds a page, so pass 2 rewrites \@abspage@last in the
         // .aux and a third pass is needed for "page X of Y" to be right.
         .coldPasses = 3 },
+    { .name = "bibtex-and-makeindex",
+        .programs = { "bibtex", "makeindex" },
+        .texFiles = { "makeidx.sty" },
+        .tools = { "bibtex", "makeindex" },
+        .coldPasses = 3 },
     { .name = "glossaries",
         .programs = { "makeglossaries" },
         .texFiles = { "glossaries.sty" },
@@ -89,6 +94,11 @@ const std::vector<FixtureCase> kCases = {
     { .name = "xelatex-fontspec",
         .engine = EngineKind::XeLaTeX,
         .texFiles = { "fontspec.sty", "lmroman10-regular.otf" } },
+    { .name = "xelatex-multipass",
+        .engine = EngineKind::XeLaTeX,
+        .programs = { "xdvipdfmx" },
+        .tools = { "xdvipdfmx" },
+        .coldPasses = 2 },
     { .name = "lualatex-luacode",
         .engine = EngineKind::LuaLaTeX,
         .texFiles = { "luacode.sty" } },
@@ -357,6 +367,27 @@ TEST_F(IncrementalTest, documentsSharingADirectoryKeepTheirState)
     auto again = fixture.build(main);
     EXPECT_TRUE(again.upToDate);
     EXPECT_TRUE(again.result.diagnostics.empty()) << again.result.diagnostics.front().message;
+}
+
+TEST_F(IncrementalTest, xelatexMultiPassRunsXdvipdfmxOnlyOnce)
+{
+    requirePrograms({ "xelatex", "xdvipdfmx" });
+    FixtureCopy fixture("xelatex-multipass");
+    auto opts = fixture.options();
+    opts.engine = EngineKind::XeLaTeX;
+
+    auto cold = fixture.build(opts);
+    ASSERT_TRUE(cold.result.success) << cold.result.lastError;
+    EXPECT_EQ(cold.result.passes, 2);
+    EXPECT_EQ(std::ranges::count(cold.toolsRun, "xdvipdfmx"), 1);
+    EXPECT_TRUE(fs::exists(fixture.path(".maketex/main.xdv")));
+    EXPECT_TRUE(fs::exists(fixture.path("main.pdf")));
+
+    auto warm = fixture.build(opts);
+    ASSERT_TRUE(warm.result.success) << warm.result.lastError;
+    EXPECT_TRUE(warm.upToDate);
+    EXPECT_EQ(warm.result.passes, 0);
+    EXPECT_TRUE(warm.toolsRun.empty());
 }
 
 INSTANTIATE_TEST_SUITE_P(Testdata, FixtureTest, ::testing::ValuesIn(kCases),

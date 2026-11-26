@@ -21,10 +21,13 @@ class WatchTest : public E2eTest {
 protected:
     // Starts `maketex watch --no-tui` in dir; stopped (and reaped) by the
     // Process destructor.
-    std::optional<maketex::Process> startWatch(const fs::path& dir)
+    std::optional<maketex::Process> startWatch(const fs::path& dir,
+        std::vector<std::string> extraArgs = { })
     {
         std::vector<std::string> argv { CliRunner::binary().string(), "watch", "--no-tui",
             "--interval-ms", "100" };
+        for (auto& a : extraArgs)
+            argv.push_back(std::move(a));
         auto env = m_cli->environment();
         return maketex::Process(argv, dir, env);
     }
@@ -159,4 +162,31 @@ TEST_F(WatchTest, editingBibFileRebuilds)
     watch->kill();
     auto output = watch->wait();
     EXPECT_TRUE(contains(output.stdoutOutput, "changed: refs.bib")) << output.stdoutOutput;
+}
+
+TEST_F(WatchTest, editingPreambleInputRebuildsWithPreambleCache)
+{
+    auto dir = project("watchfmt");
+    write(dir / "macros.tex", "\\newcommand{\\greeting}{First}\n");
+    write(dir / "main.tex",
+        "\\documentclass{article}\n"
+        "\\input{macros}\n"
+        "\\begin{document}\n"
+        "\\greeting.\n"
+        "\\end{document}\n");
+
+    auto watch = startWatch(dir, { "--preamble-cache" });
+    ASSERT_TRUE(eventually([&] { return fs::exists(dir / "main.pdf"); }))
+        << "initial preamble-cache build never published";
+    ASSERT_TRUE(fs::exists(dir / ".maketex" / "main-preamble.fmt"));
+    auto firstBuild = mtime(dir / "main.pdf");
+
+    std::this_thread::sleep_for(300ms);
+    write(dir / "macros.tex", "\\newcommand{\\greeting}{Second}\n");
+
+    EXPECT_TRUE(eventually([&] { return mtime(dir / "main.pdf") != firstBuild; }))
+        << "editing macros.tex did not trigger a rebuild under --preamble-cache";
+    watch->kill();
+    auto output = watch->wait();
+    EXPECT_TRUE(contains(output.stdoutOutput, "changed: macros.tex")) << output.stdoutOutput;
 }

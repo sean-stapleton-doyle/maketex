@@ -16,6 +16,7 @@
 #include <algorithm>
 #include <ctime>
 #include <format>
+#include <future>
 #include <iterator>
 #include <unordered_set>
 
@@ -39,6 +40,9 @@ BuildDriver::BuildDriver(IEngine& engine,
     , m_processLimits(std::move(config.processLimits))
     , m_contentFilters(std::move(config.contentFilters))
     , m_diagnosticPolicy(std::move(config.diagnosticPolicy))
+    , m_preambleProvider(std::move(config.preambleProvider))
+    , m_draftFirstPass(config.draftFirstPass)
+    , m_xelatexXdvSplit(config.xelatexXdvSplit)
 {
 }
 
@@ -280,6 +284,10 @@ bool BuildDriver::engineUpToDate(FileStateTracker& tracker)
         if (needed && !fs::exists(node->path()))
             return false;
     }
+    // Under XeLaTeX -no-pdf split, the .fls records .xdv rather than .pdf:
+    // verify the final PDF produced by xdvipdfmx still exists.
+    if (m_xelatexXdvSplit && !fs::exists(m_inv.jobFile(".pdf")))
+        return false;
     return true;
 }
 
@@ -346,11 +354,25 @@ BuildDriver::ToolPassOutcome BuildDriver::runStaleTools(
 {
     const auto toolEnv = toolSearchEnv(m_inv.texFile.parent_path(), m_inv.extraEnv);
 
+    struct PendingTool {
+        ITool* tool = nullptr;
+        std::vector<ToolInput> rawInputs;
+        Digests inputs;
+        std::unordered_set<std::string> inputKeys;
+        std::vector<fs::path> outputs;
+        std::vector<std::optional<Hash>> before;
+        std::unordered_set<std::string> outputKeys;
+        std::vector<std::string> args;
+        ToolInvocation inv;
+    };
+
     ToolPassOutcome outcome;
+    std::vector<PendingTool> pending;
     for (auto* tool : m_tools) {
         if (!tool->applies(ctx))
             continue;
-        auto inputs = digestInputs(tool->inputs(ctx), tracker);
+        auto rawInputs = tool->inputs(ctx);
+        auto inputs = digestInputs(rawInputs, tracker);
         if (!inputs) {
             outcome.snapshotError = inputs.error();
             return outcome;
@@ -363,8 +385,13 @@ BuildDriver::ToolPassOutcome BuildDriver::runStaleTools(
         if (!*stale)
             continue;
 
+        std::unordered_set<std::string> inputKeys;
+        for (const auto& ti : rawInputs)
+            inputKeys.insert(key(ti.path));
+
         auto outputs = tool->outputs(ctx);
         std::vector<std::optional<Hash>> before;
+        std::unordered_set<std::string> outputKeys;
         for (const auto& out : outputs) {
             auto hash = currentHash(out, tracker);
             if (!hash) {
@@ -372,63 +399,153 @@ BuildDriver::ToolPassOutcome BuildDriver::runStaleTools(
                 return outcome;
             }
             before.push_back(*hash);
+            outputKeys.insert(key(out));
         }
 
-        notify({ .kind = BuildEvent::Kind::ToolStarted,
-            .toolName = std::string(tool->name()) });
         auto toolInv = makeToolInv(m_inv, *tool);
-        // Evaluated before the launchProcess call: its by-value invocation
-        // parameter may be move-constructed before sibling arguments read
-        // toolInv (argument evaluation is indeterminately sequenced).
         auto args = tool->buildArgs(toolInv);
-        auto workingDir = toolInv.workingDir;
-        auto toolResult = launchProcess(args, workingDir, tool->invokerKind(),
-            std::move(toolInv), toolEnv, m_processLimits);
-        notify({ .kind = BuildEvent::Kind::ToolFinished,
-            .toolName = std::string(tool->name()),
-            .success = toolResult.success() });
+        pending.push_back(PendingTool {
+            .tool = tool,
+            .rawInputs = std::move(rawInputs),
+            .inputs = std::move(*inputs),
+            .inputKeys = std::move(inputKeys),
+            .outputs = std::move(outputs),
+            .before = std::move(before),
+            .outputKeys = std::move(outputKeys),
+            .args = std::move(args),
+            .inv = std::move(toolInv),
+        });
+    }
 
-        auto ruleName = toolRuleName(*tool);
-        if (!toolResult.success()) {
-            recordRule(m_db, ruleName, false, std::string(tool->name()));
-            outcome.failedToolName = std::string(tool->name());
-            outcome.failure = std::move(toolResult);
-            return outcome;
-        }
+    if (pending.empty())
+        return outcome;
 
-        // Record the inputs this run consumed — hashed before it started —
-        // and the outputs it produced, so neither a later pass nor the next
-        // invocation reruns it unless one of them changes.
-        std::vector<std::pair<std::string, Hash>> producedOutputs;
-        bool changed = outputs.empty();
-        for (size_t i = 0; i < outputs.size(); ++i) {
-            auto after = currentHash(outputs[i], tracker);
-            if (!after) {
-                outcome.snapshotError = after.error();
-                return outcome;
+    // Group stale tools into waves that can safely execute in parallel: two
+    // tools conflict if either has unknown outputs, or if they share an output
+    // path or one's output is the other's declared input (even if that input
+    // does not exist yet before the earlier wave runs).
+    auto conflicts = [](const PendingTool& a, const PendingTool& b) {
+        if (a.outputs.empty() || b.outputs.empty())
+            return true;
+        for (const auto& out : a.outputKeys)
+            if (b.outputKeys.contains(out) || b.inputKeys.contains(out))
+                return true;
+        for (const auto& out : b.outputKeys)
+            if (a.inputKeys.contains(out))
+                return true;
+        return false;
+    };
+
+    std::vector<std::vector<size_t>> waves;
+    for (size_t idx = 0; idx < pending.size(); ++idx) {
+        if (!waves.empty()) {
+            bool canJoin = std::ranges::none_of(waves.back(), [&](size_t prev) {
+                return conflicts(pending[prev], pending[idx]);
+            });
+            if (canJoin) {
+                waves.back().push_back(idx);
+                continue;
             }
-            if (*after != before[i])
-                changed = true;
-            if (*after)
-                producedOutputs.emplace_back(key(outputs[i]), **after);
         }
-        auto now = static_cast<int64_t>(std::time(nullptr));
-        const std::string command(tool->name());
-        // Outputs first: if interrupted between the two, the inputs record
-        // still says the tool must run.
-        m_db.recordRun({ .name = ruleName + "#outputs", .command = command, .ran_at = now, .succeeded = true },
-            producedOutputs);
-        m_db.recordRun({ .name = ruleName, .command = command, .ran_at = now, .succeeded = true },
-            { inputs->begin(), inputs->end() });
+        waves.push_back({ idx });
+    }
 
-        outcome.ranAny = true;
-        outcome.outputsChanged = outcome.outputsChanged || changed;
-        if (changed) {
-            outcome.changes.push_back(outputs.empty()
-                    ? std::string(tool->name()) + " ran (its outputs are not tracked)"
-                    : std::string(tool->name()) + " rewrote " + outputs.front().filename().string());
+    for (size_t waveIdx = 0; waveIdx < waves.size(); ++waveIdx) {
+        const auto& wave = waves[waveIdx];
+        if (waveIdx > 0) {
+            // Re-digest declared inputs for subsequent waves so outputs
+            // produced by an earlier wave are recorded accurately in stateDb.
+            for (size_t idx : wave) {
+                auto fresh = digestInputs(pending[idx].rawInputs, tracker);
+                if (!fresh) {
+                    outcome.snapshotError = fresh.error();
+                    return outcome;
+                }
+                pending[idx].inputs = std::move(*fresh);
+            }
         }
-        std::ranges::move(diagnostics::extract(toolResult), std::back_inserter(outcome.diagnostics));
+        std::vector<RunResult<ToolInvocation>> results;
+        results.reserve(wave.size());
+
+        if (wave.size() == 1) {
+            auto& item = pending[wave.front()];
+            notify({ .kind = BuildEvent::Kind::ToolStarted,
+                .toolName = std::string(item.tool->name()) });
+            auto workingDir = item.inv.workingDir;
+            results.push_back(launchProcess(item.args, workingDir, item.tool->invokerKind(),
+                item.inv, toolEnv, m_processLimits));
+            notify({ .kind = BuildEvent::Kind::ToolFinished,
+                .toolName = std::string(item.tool->name()),
+                .success = results.back().success() });
+        } else {
+            for (size_t idx : wave)
+                notify({ .kind = BuildEvent::Kind::ToolStarted,
+                    .toolName = std::string(pending[idx].tool->name()) });
+
+            std::vector<std::future<RunResult<ToolInvocation>>> futures;
+            futures.reserve(wave.size());
+            for (size_t idx : wave) {
+                futures.push_back(std::async(std::launch::async,
+                    [&, idx] {
+                        const auto& p = pending[idx];
+                        return launchProcess(p.args, p.inv.workingDir, p.tool->invokerKind(),
+                            p.inv, toolEnv, m_processLimits);
+                    }));
+            }
+            for (size_t i = 0; i < wave.size(); ++i) {
+                results.push_back(futures[i].get());
+                notify({ .kind = BuildEvent::Kind::ToolFinished,
+                    .toolName = std::string(pending[wave[i]].tool->name()),
+                    .success = results.back().success() });
+            }
+        }
+
+        // Record outcomes deterministically in roster order on the main thread.
+        for (size_t i = 0; i < wave.size(); ++i) {
+            auto& item = pending[wave[i]];
+            auto& toolResult = results[i];
+            auto ruleName = toolRuleName(*item.tool);
+            if (!toolResult.success()) {
+                recordRule(m_db, ruleName, false, std::string(item.tool->name()));
+                if (!outcome.failure) {
+                    outcome.failedToolName = std::string(item.tool->name());
+                    outcome.failure = std::move(toolResult);
+                }
+                continue;
+            }
+
+            std::vector<std::pair<std::string, Hash>> producedOutputs;
+            bool changed = item.outputs.empty();
+            for (size_t j = 0; j < item.outputs.size(); ++j) {
+                auto after = currentHash(item.outputs[j], tracker);
+                if (!after) {
+                    outcome.snapshotError = after.error();
+                    return outcome;
+                }
+                if (*after != item.before[j])
+                    changed = true;
+                if (*after)
+                    producedOutputs.emplace_back(key(item.outputs[j]), **after);
+            }
+            auto now = static_cast<int64_t>(std::time(nullptr));
+            const std::string command(item.tool->name());
+            m_db.recordRun({ .name = ruleName + "#outputs", .command = command, .ran_at = now, .succeeded = true },
+                producedOutputs);
+            m_db.recordRun({ .name = ruleName, .command = command, .ran_at = now, .succeeded = true },
+                { item.inputs.begin(), item.inputs.end() });
+
+            outcome.ranAny = true;
+            outcome.outputsChanged = outcome.outputsChanged || changed;
+            if (changed) {
+                outcome.changes.push_back(item.outputs.empty()
+                        ? std::string(item.tool->name()) + " ran (its outputs are not tracked)"
+                        : std::string(item.tool->name()) + " rewrote " + item.outputs.front().filename().string());
+            }
+            std::ranges::move(diagnostics::extract(toolResult), std::back_inserter(outcome.diagnostics));
+        }
+
+        if (outcome.failure)
+            return outcome;
     }
     return outcome;
 }
@@ -565,6 +682,9 @@ DriverResult BuildDriver::run()
     // Tool warnings collected across passes; reported with the result.
     std::vector<Diagnostic> toolWarnings;
 
+    if (m_inv.preamble.empty() && m_preambleProvider)
+        m_inv.preamble = m_preambleProvider();
+
     for (int pass = 0; pass < m_maxPasses; ++pass) {
         auto before = takeSnapshot(tracker);
         if (!before) {
@@ -576,7 +696,10 @@ DriverResult BuildDriver::run()
         // Sources that exist before the pass; a file created during it
         // (epstopdf's figure-eps-converted-to.pdf) is generated, not edited.
         auto sourcesBefore = stampKnownSources();
-        auto engineResult = m_engine.run(m_inv, m_processLimits);
+        EngineInvocation passInv = m_inv;
+        const bool ranDraft = (pass == 0 && m_draftFirstPass) || m_xelatexXdvSplit;
+        passInv.draftMode = ranDraft;
+        auto engineResult = m_engine.run(passInv, m_processLimits);
         // Checked now, before tools rewrite their outputs (.bbl is a source
         // the engine reads): only the user's saves during the pass count.
         auto edited = editedDuringPass(sourcesBefore);
@@ -642,6 +765,10 @@ DriverResult BuildDriver::run()
         if (edited)
             reasons.push_back(edited->filename().string() + " was saved during the pass");
         reasons.insert(reasons.end(), tools.changes.begin(), tools.changes.end());
+        // If pass 1 ran with -draftmode (pdflatex/lualatex) and unexpectedly
+        // produced no rerun signals, run one non-draft pass to emit the PDF.
+        if (reasons.empty() && pass == 0 && m_draftFirstPass && !m_xelatexXdvSplit)
+            reasons.emplace_back("emitting final PDF after draft pass");
         if (!reasons.empty()) {
             std::string why;
             for (const auto& r : reasons)
@@ -650,6 +777,37 @@ DriverResult BuildDriver::run()
             notify({ .kind = BuildEvent::Kind::RerunScheduled, .pass = pass + 2, .detail = why });
         }
         if (reasons.empty()) {
+            // XeLaTeX -no-pdf split: convert the converged .xdv to .pdf once.
+            if (m_xelatexXdvSplit) {
+                auto xdv = m_inv.jobFile(".xdv");
+                if (fs::exists(xdv)) {
+                    notify({ .kind = BuildEvent::Kind::ToolStarted, .toolName = "xdvipdfmx" });
+                    ToolInvocation xdvInv {
+                        .workingDir = m_inv.outputDir,
+                        .jobName = m_inv.resolvedJobName(),
+                        .outputDir = m_inv.outputDir,
+                        .sourceDir = m_inv.texFile.parent_path(),
+                    };
+                    std::vector<std::string> xdvArgs {
+                        "xdvipdfmx", "-o", m_inv.resolvedJobName() + ".pdf",
+                        m_inv.resolvedJobName() + ".xdv"
+                    };
+                    auto xdvEnv = toolSearchEnv(m_inv.texFile.parent_path(), m_inv.extraEnv);
+                    auto xdvRes = launchProcess(xdvArgs, m_inv.outputDir, InvokerKind::Xdvipdfmx,
+                        std::move(xdvInv), xdvEnv, m_processLimits);
+                    notify({ .kind = BuildEvent::Kind::ToolFinished,
+                        .toolName = "xdvipdfmx",
+                        .success = xdvRes.success() });
+                    if (!xdvRes.success()) {
+                        latexRule.markRan(m_db, false, command);
+                        result.lastError = failureMessage("xdvipdfmx", xdvRes);
+                        result.diagnostics = diagnostics::extract(xdvRes);
+                        return result;
+                    }
+                    std::ranges::move(diagnostics::extract(xdvRes), std::back_inserter(toolWarnings));
+                }
+            }
+
             result.diagnostics = diagnostics::extract(engineResult);
             std::ranges::move(toolWarnings, std::back_inserter(result.diagnostics));
             if (auto policyError = applyDiagnosticPolicy(result.diagnostics, m_diagnosticPolicy);

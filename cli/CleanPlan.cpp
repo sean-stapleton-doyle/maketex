@@ -17,7 +17,7 @@ namespace {
         ".acn", ".acr", ".alg", ".aux", ".bbl", ".bcf", ".blg", ".fls",
         ".glg", ".glo", ".gls", ".glstex", ".idx", ".ilg", ".ind", ".ist",
         ".loa", ".lof", ".log", ".lot", ".nav", ".nlg", ".nlo", ".nls",
-        ".out", ".pytxcode", ".run.xml", ".snm", ".toc", ".vrb", ".xdy"
+        ".out", ".pytxcode", ".run.xml", ".snm", ".toc", ".vrb", ".xdv", ".xdy"
     };
 
     // Usually generated, but also written by hand (custom index styles) or
@@ -51,6 +51,11 @@ CleanPlan computeCleanPlan(const std::optional<BuildFileSets>& fileSets,
     for (const auto& ext : extraExtensions)
         candidates.insert(outputDir / (jobName + ext));
     candidates.insert(outputDir / ("pythontex-files-" + jobName));
+    // Precompiled preamble format cache artifacts.
+    candidates.insert(outputDir / (jobName + "-preamble.fmt"));
+    candidates.insert(outputDir / (jobName + "-preamble.fls"));
+    candidates.insert(outputDir / (jobName + "-preamble.log"));
+    candidates.insert(outputDir / ("." + jobName + "-preamble.tex"));
 
     // Published artifacts live outside outputDir by design; track their
     // canonical forms so the outside-outputDir safety check can wave

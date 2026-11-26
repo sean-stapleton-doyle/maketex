@@ -154,3 +154,51 @@ TEST_F(FileWatcherTest, exclusionAppliesInsideWatchedDirectories)
     watcher.setWatchSet({ m_dir }, [&](const fs::path& p) { return p.extension() == ".pdf"; });
     EXPECT_TRUE(watcher.captureBaseline().empty());
 }
+
+TEST_F(FileWatcherTest, nativeEventsWakeWellBeforePollInterval)
+{
+    // A 5-second poll interval proves wakeup comes from kqueue/inotify, not polling.
+    auto file = m_dir / "main.tex";
+    std::ofstream(file) << "v1";
+    FileWatcher watcher(std::chrono::milliseconds(5000), std::chrono::milliseconds(25));
+    watcher.setWatchSet({ file });
+
+    std::stop_source stop;
+    std::jthread editor([&] {
+        std::this_thread::sleep_for(std::chrono::milliseconds(40));
+        std::ofstream(file) << "v2, edited";
+    });
+
+    auto start = std::chrono::steady_clock::now();
+    auto changed = watcher.waitForChange(stop.get_token());
+    auto elapsedMs = std::chrono::duration_cast<std::chrono::milliseconds>(
+        std::chrono::steady_clock::now() - start)
+                         .count();
+
+    ASSERT_EQ(changed.size(), 1u);
+    EXPECT_EQ(changed[0], file);
+    EXPECT_LT(elapsedMs, 1000) << "native watcher took " << elapsedMs << " ms (fell back to poll?)";
+}
+
+TEST_F(FileWatcherTest, nudgeAndStopWakeNativeWaiterImmediately)
+{
+    auto file = m_dir / "main.tex";
+    std::ofstream(file) << "v1";
+    FileWatcher watcher(std::chrono::milliseconds(5000), std::chrono::milliseconds(25));
+    watcher.setWatchSet({ file });
+
+    std::stop_source stop;
+    std::jthread nudger([&] {
+        std::this_thread::sleep_for(std::chrono::milliseconds(40));
+        watcher.nudge();
+    });
+
+    auto start = std::chrono::steady_clock::now();
+    auto changed = watcher.waitForChange(stop.get_token());
+    auto elapsedMs = std::chrono::duration_cast<std::chrono::milliseconds>(
+        std::chrono::steady_clock::now() - start)
+                         .count();
+
+    EXPECT_TRUE(changed.empty());
+    EXPECT_LT(elapsedMs, 1000) << "nudge took " << elapsedMs << " ms";
+}

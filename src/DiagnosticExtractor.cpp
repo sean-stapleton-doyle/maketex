@@ -903,6 +903,17 @@ namespace {
                 { "PythonTeX warning", false, kWarning, false } });
     }
 
+    // xdvipdfmx prefixes fatal errors with "xdvipdfmx:fatal:" and warnings
+    // with "xdvipdfmx:warning:".
+    std::vector<Diagnostic> extractXdvipdfmx(const std::string& output)
+    {
+        return extractByLinePatterns(output,
+            { { "xdvipdfmx:fatal:", false, kError, true },
+                { "xdvipdfmx:warning:", false, kWarning, true },
+                { "** ERROR **", false, kError, true },
+                { "** WARNING **", false, kWarning, true } });
+    }
+
     // Custom tools have arbitrary output; pick up conventional error/warning
     // prefixes and let the fallback surface full output if nothing matches.
     std::vector<Diagnostic> extractCustomTool(const std::string& output)
@@ -1031,6 +1042,9 @@ namespace diagnostics {
             break;
         case InvokerKind::Pythontex:
             diags = extractPythontex(output);
+            break;
+        case InvokerKind::Xdvipdfmx:
+            diags = extractXdvipdfmx(output);
             break;
         case InvokerKind::Custom:
             diags = extractCustomTool(output);

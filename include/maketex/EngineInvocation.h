@@ -16,10 +16,18 @@ struct EngineInvocation {
     bool haltOnError = true;
     bool shellEscape = false;
     bool synctex = false;
+    // Skip PDF generation for this pass: `-draftmode` on pdflatex/lualatex,
+    // `-no-pdf` (emit .xdv only) on xelatex.
+    bool draftMode = false;
     // TeX code run before the document, for package options the document
     // can't know it needs (e.g. minted 2's outputdir). Empty: the engine is
     // given the tex file directly.
     std::string preamble;
+    // Precompiled preamble format name (`-fmt=<formatName>`, looked up via
+    // TEXFORMATS). When set with skipPreamble, the engine skips lines before
+    // \begin{document} in texFile while preserving exact file:line locations.
+    std::string formatName;
+    bool skipPreamble = false;
     // Extra environment variables (including search paths such as TEXINPUTS,
     // BIBINPUTS, BSTINPUTS, INDEXSTYLE) passed to the engine and tools.
     std::vector<std::pair<std::string, std::string>> extraEnv;

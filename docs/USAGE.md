@@ -144,6 +144,7 @@ arbitrary commands; the error tells you to add the flag.
 | `--format <fmt>` | report format: `human` (default), `json`, or `github` (build only) |
 | `--shell-escape` / `--no-shell-escape` | enable `\write18` (default off) |
 | `--synctex` / `--no-synctex` | generate SyncTeX data (default on) |
+| `--preamble-cache` / `--no-preamble-cache` | cache the compiled `pdflatex` preamble as a `.fmt` format to speed up body-only rebuilds (default off) |
 | `--halt-on-error` / `--no-halt-on-error` | stop at the first TeX error (default on) |
 | `--warnings-as-errors` / `--no-warnings-as-errors` | treat any LaTeX or tool warning as a build failure (default off) |
 | `--max-passes <n>` | give up if not converged after n passes (default 8) |

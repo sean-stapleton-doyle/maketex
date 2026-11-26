@@ -71,17 +71,37 @@ std::vector<std::string> EngineBase::texEngineArgs(std::string_view program,
         args.emplace_back("-shell-escape");
     if (inv.synctex)
         args.emplace_back("-synctex=1");
+    if (inv.draftMode)
+        args.emplace_back(invokerKind() == InvokerKind::XeLaTeX ? "-no-pdf" : "-draftmode");
+    if (!inv.formatName.empty())
+        args.emplace_back("-fmt=" + inv.formatName);
     if (!inv.outputDir.empty())
         args.emplace_back("-output-directory=" + inv.outputDir.string());
-    if (inv.jobName || !inv.preamble.empty())
-        // With a preamble the first input is TeX code, not the file, so the
-        // job name must be explicit.
+    if (inv.jobName || !inv.preamble.empty() || inv.skipPreamble)
+        // When the first input is TeX code rather than the file path, the job
+        // name must be explicit.
         args.emplace_back("-jobname=" + inv.resolvedJobName());
     appendExtraOptions(args);
-    if (inv.preamble.empty())
+    if (inv.skipPreamble) {
+        // Skip everything in texFile up to \begin{document} (already loaded in
+        // the precompiled format) while keeping texFile as the active input
+        // stream so -file-line-error reports exact file:line locations.
+        std::string skip = inv.preamble
+            + "\\makeatletter"
+              "\\long\\def\\maketex@skip#1\\begin#2{"
+              "\\def\\maketex@arg{#2}"
+              "\\ifx\\maketex@arg\\maketex@doc\\expandafter\\maketex@done"
+              "\\else\\expandafter\\maketex@skip\\fi}"
+              "\\def\\maketex@doc{document}"
+              "\\def\\maketex@done{\\makeatother\\begin{document}}"
+              "\\expandafter\\maketex@skip\\@@input \""
+            + inv.texFile.string() + "\"";
+        args.emplace_back(std::move(skip));
+    } else if (inv.preamble.empty()) {
         args.emplace_back(inv.texFile.string());
-    else
+    } else {
         args.emplace_back(inv.preamble + "\\input{\"" + inv.texFile.string() + "\"}");
+    }
     return args;
 }
 

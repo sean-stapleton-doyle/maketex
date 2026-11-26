@@ -1076,3 +1076,234 @@ TEST_F(BuildDriverTest, movedCheckoutWithChangedSourceRebuilds)
     EXPECT_TRUE(res.success);
     EXPECT_EQ(res.passes, 1); // content change must defeat the skip
 }
+
+TEST_F(BuildDriverTest, preambleProviderIsSkippedWhenUpToDate)
+{
+    const fs::path texFile = m_dir / "main.tex";
+    auto fls = "PWD " + m_dir.string() + "\nINPUT " + texFile.string() + "\nOUTPUT "
+        + (m_dir / "main.pdf").string() + "\n";
+
+    int calls = 0;
+    auto provider = [&] {
+        ++calls;
+        return std::string("\\relax");
+    };
+
+    {
+        FakeEngine engine({ FakeCall { .writes = {
+                                           { m_dir / "main.fls", fls },
+                                           { m_dir / "main.log", "This is pdfTeX\n" },
+                                           { m_dir / "main.pdf", "pdf" },
+                                       } } });
+        ASSERT_TRUE(BuildDriver(engine, m_db, m_hasher, makeInv(), { .preambleProvider = provider })
+                .run()
+                .success);
+        EXPECT_EQ(calls, 1);
+    }
+
+    FakeEngine warmEngine({ });
+    auto warm = BuildDriver(warmEngine, m_db, m_hasher, makeInv(), { .preambleProvider = provider }).run();
+    EXPECT_TRUE(warm.success);
+    EXPECT_TRUE(warm.upToDate);
+    EXPECT_EQ(calls, 1); // not invoked on up-to-date skip
+}
+
+TEST_F(BuildDriverTest, draftFirstPassRunsPass1DraftAndFinalizesPdf)
+{
+    class DraftSpyEngine final : public maketex::IEngine {
+    public:
+        explicit DraftSpyEngine(fs::path dir)
+            : m_dir(std::move(dir))
+        {
+        }
+        std::string_view name() const override { return "pdflatex"; }
+        InvokerKind invokerKind() const override { return InvokerKind::PdfLaTeX; }
+        RunResult<EngineInvocation> run(const EngineInvocation& inv, const maketex::WaitLimits&) override
+        {
+            draftFlags.push_back(inv.draftMode);
+            std::ofstream(m_dir / "main.fls") << "PWD " << m_dir.string() << "\nINPUT "
+                                              << (m_dir / "main.tex").string() << "\n";
+            std::ofstream(m_dir / "main.log") << "This is pdfTeX\n";
+            return RunResult<EngineInvocation> { .invocation = inv, .kind = invokerKind(), .exitCode = 0 };
+        }
+        std::vector<bool> draftFlags;
+
+    private:
+        fs::path m_dir;
+    };
+
+    DraftSpyEngine engine(m_dir);
+    auto res = BuildDriver(engine, m_db, m_hasher, makeInv(), { .draftFirstPass = true }).run();
+    ASSERT_TRUE(res.success) << res.lastError;
+    // Even though pass 1 had no rerun warnings, a non-draft pass 2 runs to
+    // produce the real PDF.
+    EXPECT_EQ(engine.draftFlags, (std::vector<bool> { true, false }));
+}
+
+TEST_F(BuildDriverTest, independentToolsRunInParallel)
+{
+    class TimedTool final : public maketex::ITool {
+    public:
+        TimedTool(std::string name, fs::path trigger, fs::path output)
+            : m_name(std::move(name))
+            , m_trigger(std::move(trigger))
+            , m_output(std::move(output))
+        {
+        }
+        std::string_view name() const override { return m_name; }
+        InvokerKind invokerKind() const override { return InvokerKind::Custom; }
+        std::vector<std::string> buildArgs(const ToolInvocation&) const override
+        {
+            return { "/bin/sh", "-c",
+                "sleep 0.25 && printf 'ok' > '" + m_output.string() + "'" };
+        }
+        bool applies(const ToolContext& ctx) const override { return ctx.wrote(m_trigger); }
+        std::vector<maketex::ToolInput> inputs(const ToolContext&) const override
+        {
+            return { { .path = m_trigger } };
+        }
+        std::vector<fs::path> outputs(const ToolContext&) const override { return { m_output }; }
+
+    private:
+        std::string m_name;
+        fs::path m_trigger;
+        fs::path m_output;
+    };
+
+    const fs::path trigA = m_dir / "main.idx";
+    const fs::path trigB = m_dir / "main.nlo";
+    const fs::path outA = m_dir / "main.ind";
+    const fs::path outB = m_dir / "main.nls";
+    auto fls = flsWithTex() + "OUTPUT " + trigA.string() + "\nOUTPUT " + trigB.string() + "\n";
+
+    FakeEngine engine({
+        FakeCall { .writes = { { m_dir / "main.fls", fls }, { m_dir / "main.log", "This is pdfTeX\n" },
+                       { trigA, "a" }, { trigB, "b" } } },
+        FakeCall { .writes = { { m_dir / "main.fls", fls }, { m_dir / "main.log", "This is pdfTeX\n" },
+                       { trigA, "a" }, { trigB, "b" } } },
+    });
+    TimedTool toolA("toolA", trigA, outA);
+    TimedTool toolB("toolB", trigB, outB);
+
+    auto start = std::chrono::steady_clock::now();
+    auto res = BuildDriver(engine, m_db, m_hasher, makeInv(), { .tools = { &toolA, &toolB } }).run();
+    auto elapsedMs = std::chrono::duration_cast<std::chrono::milliseconds>(
+        std::chrono::steady_clock::now() - start)
+                         .count();
+
+    ASSERT_TRUE(res.success) << res.lastError;
+    EXPECT_TRUE(fs::exists(outA));
+    EXPECT_TRUE(fs::exists(outB));
+    // Two 250 ms tools run in parallel: should finish well under 450 ms.
+    EXPECT_LT(elapsedMs, 450) << "tools appear to have run sequentially (" << elapsedMs << " ms)";
+}
+
+TEST_F(BuildDriverTest, dependentToolsRunInSeparateWaves)
+{
+    class ChainedTool final : public maketex::ITool {
+    public:
+        ChainedTool(std::string name, fs::path trigger, fs::path input, fs::path output, std::string cmd)
+            : m_name(std::move(name))
+            , m_trigger(std::move(trigger))
+            , m_input(std::move(input))
+            , m_output(std::move(output))
+            , m_cmd(std::move(cmd))
+        {
+        }
+        std::string_view name() const override { return m_name; }
+        InvokerKind invokerKind() const override { return InvokerKind::Custom; }
+        std::vector<std::string> buildArgs(const ToolInvocation&) const override
+        {
+            return { "/bin/sh", "-c", m_cmd };
+        }
+        bool applies(const ToolContext& ctx) const override { return ctx.wrote(m_trigger); }
+        std::vector<maketex::ToolInput> inputs(const ToolContext&) const override
+        {
+            return { { .path = m_input } };
+        }
+        std::vector<fs::path> outputs(const ToolContext&) const override { return { m_output }; }
+
+    private:
+        std::string m_name;
+        fs::path m_trigger;
+        fs::path m_input;
+        fs::path m_output;
+        std::string m_cmd;
+    };
+
+    const fs::path trig = m_dir / "main.idx";
+    const fs::path mid = m_dir / "stage1.out";
+    const fs::path finalOut = m_dir / "stage2.out";
+    auto fls = flsWithTex() + "OUTPUT " + trig.string() + "\n";
+
+    FakeEngine engine({
+        FakeCall { .writes = { { m_dir / "main.fls", fls }, { m_dir / "main.log", "This is pdfTeX\n" },
+                       { trig, "start" } } },
+        FakeCall { .writes = { { m_dir / "main.fls", fls }, { m_dir / "main.log", "This is pdfTeX\n" },
+                       { trig, "start" } } },
+    });
+    // Tool A sleeps briefly before writing mid; Tool B reads mid as its input
+    // and fails if mid does not yet exist — proving they ran in separate waves.
+    ChainedTool toolA("stageA", trig, trig, mid,
+        "sleep 0.1 && printf 'hello' > '" + mid.string() + "'");
+    ChainedTool toolB("stageB", trig, mid, finalOut,
+        "test -f '" + mid.string() + "' && cat '" + mid.string() + "' > '" + finalOut.string() + "'");
+
+    auto res = BuildDriver(engine, m_db, m_hasher, makeInv(), { .tools = { &toolA, &toolB } }).run();
+    ASSERT_TRUE(res.success) << res.lastError;
+    ASSERT_TRUE(fs::exists(finalOut));
+    std::ifstream in(finalOut);
+    std::string got((std::istreambuf_iterator<char>(in)), { });
+    EXPECT_EQ(got, "hello");
+}
+
+TEST_F(BuildDriverTest, xelatexXdvSplitPassesDraftOnEveryPassAndChecksPdfOnUpToDate)
+{
+    class XeSpyEngine final : public maketex::IEngine {
+    public:
+        explicit XeSpyEngine(fs::path dir)
+            : m_dir(std::move(dir))
+        {
+        }
+        std::string_view name() const override { return "xelatex"; }
+        InvokerKind invokerKind() const override { return InvokerKind::XeLaTeX; }
+        RunResult<EngineInvocation> run(const EngineInvocation& inv, const maketex::WaitLimits&) override
+        {
+            draftFlags.push_back(inv.draftMode);
+            ++calls;
+            std::ofstream(m_dir / "main.fls") << "PWD " << m_dir.string() << "\nINPUT "
+                                              << (m_dir / "main.tex").string() << "\nOUTPUT "
+                                              << (m_dir / "main.log").string() << "\n";
+            // Pass 1 asks for rerun; pass 2 converges without creating .xdv
+            // (so xdvipdfmx isn't spawned in this unit test), and creates .pdf
+            // directly to test the up-to-date PDF existence guard below.
+            std::ofstream(m_dir / "main.log")
+                << (calls == 1 ? "Rerun to get cross-references right\n" : "This is XeTeX\n");
+            if (calls >= 2)
+                std::ofstream(m_dir / "main.pdf") << "%PDF-1.5\n";
+            return RunResult<EngineInvocation> { .invocation = inv, .kind = invokerKind(), .exitCode = 0 };
+        }
+        std::vector<bool> draftFlags;
+        int calls = 0;
+
+    private:
+        fs::path m_dir;
+    };
+
+    XeSpyEngine engine(m_dir);
+    auto res = BuildDriver(engine, m_db, m_hasher, makeInv(), { .xelatexXdvSplit = true }).run();
+    ASSERT_TRUE(res.success) << res.lastError;
+    EXPECT_EQ(engine.draftFlags, (std::vector<bool> { true, true }));
+
+    // Warm run with .pdf present skips cleanly.
+    auto warm = BuildDriver(engine, m_db, m_hasher, makeInv(), { .xelatexXdvSplit = true }).run();
+    EXPECT_TRUE(warm.success);
+    EXPECT_TRUE(warm.upToDate);
+
+    // Deleting .pdf must defeat the up-to-date check even though .fls only
+    // recorded .xdv as output.
+    fs::remove(m_dir / "main.pdf");
+    auto rebuilt = BuildDriver(engine, m_db, m_hasher, makeInv(), { .xelatexXdvSplit = true }).run();
+    EXPECT_TRUE(rebuilt.success);
+    EXPECT_FALSE(rebuilt.upToDate);
+}

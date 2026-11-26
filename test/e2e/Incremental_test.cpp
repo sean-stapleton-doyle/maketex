@@ -98,6 +98,22 @@ TEST_F(IncrementalCliTest, deletedPdfIsRepublishedWithoutRebuilding)
     EXPECT_TRUE(fs::exists(dir / "main.pdf"));
 }
 
+TEST_F(IncrementalCliTest, externallyModifiedPdfIsRepublishedWithoutRebuilding)
+{
+    auto dir = project("republish-corrupt");
+    write(dir / "main.tex", kHello);
+    build(dir);
+
+    // Overwrite the published PDF externally; the published_stamp check must
+    // notice the mismatch and restore the real PDF without re-running TeX.
+    write(dir / "main.pdf", "corrupted");
+    EXPECT_TRUE(contains(build(dir), "up to date"));
+    std::ifstream pdf(dir / "main.pdf", std::ios::binary);
+    std::string header(5, '\0');
+    pdf.read(header.data(), 5);
+    EXPECT_EQ(header, "%PDF-");
+}
+
 TEST_F(IncrementalCliTest, deletedStateDirectoryRebuildsOnce)
 {
     auto dir = project("fresh");

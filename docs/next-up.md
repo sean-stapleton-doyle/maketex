@@ -22,12 +22,10 @@ PDF.
 
 ## Engines and formats
 
-- The latex → dvips → ps2pdf route and xelatex's `-no-pdf` + xdvipdfmx
-  split.
+- The latex → dvips → ps2pdf route (XeLaTeX `-no-pdf` + `xdvipdfmx` split is now built in).
 
 ## Design notes carried forward
 
 - `EngineInvocation` still mixes configuration with per-build context
   (review 06-09, M1).
-- Watch mode polls; a native file-event backend (FSEvents, inotify) would
-  cut latency and idle CPU.
+- Compile API & multi-tenant sandboxing: see [api_and_sandboxing_design.md](api_and_sandboxing_design.md).

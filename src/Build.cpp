@@ -44,10 +44,60 @@ std::string_view version()
     return MAKETEX_VERSION;
 }
 
+namespace {
+
+    std::optional<fs::path> findOnPath(std::string_view program)
+    {
+        const char* pathEnv = std::getenv("PATH");
+        if (!pathEnv)
+            return std::nullopt;
+        std::string_view rest(pathEnv);
+        std::error_code ec;
+        while (!rest.empty()) {
+            auto colon = rest.find(':');
+            auto dir = rest.substr(0, colon);
+            if (!dir.empty()) {
+                fs::path candidate = fs::path(dir) / program;
+                if (fs::is_regular_file(candidate, ec) && ::access(candidate.c_str(), X_OK) == 0)
+                    return candidate;
+            }
+            if (colon == std::string_view::npos)
+                break;
+            rest.remove_prefix(colon + 1);
+        }
+        return std::nullopt;
+    }
+
+    fs::path cacheDir()
+    {
+        if (const char* xdg = std::getenv("XDG_CACHE_HOME"); xdg && *xdg)
+            return fs::path(xdg) / "maketex";
+        if (const char* home = std::getenv("HOME"); home && *home)
+            return fs::path(home) / ".cache" / "maketex";
+        return { };
+    }
+
+    std::string fileStampToken(const fs::path& p)
+    {
+        std::error_code ec;
+        auto mtime = fs::last_write_time(p, ec);
+        if (ec)
+            return { };
+        auto size = fs::file_size(p, ec);
+        if (ec)
+            return { };
+        auto ns = std::chrono::duration_cast<std::chrono::nanoseconds>(
+            mtime.time_since_epoch())
+                      .count();
+        return std::format("{}:{}", size, ns);
+    }
+
+} // namespace
+
 std::vector<fs::path> texSystemRoots()
 {
-    // Constant for the life of the process, and a watch session builds many
-    // times: ask kpsewhich once, for every tree in one call.
+    // Constant for the life of the process, and cached on disk across CLI
+    // invocations so `✓ up to date` runs don't pay ~25 ms to spawn kpsewhich.
     static const std::vector<fs::path> roots = [] {
         // The distribution and its generated caches. TEXMFHOME is left out
         // on purpose: it holds the user's own packages, whose edits must
@@ -55,6 +105,37 @@ std::vector<fs::path> texSystemRoots()
         // MacTeX/TeX Live install, and Debian splits out TEXMFMAIN.
         constexpr std::string_view kVars[] = { "TEXMFROOT", "TEXMFDIST", "TEXMFMAIN",
             "TEXMFLOCAL", "TEXMFSYSVAR", "TEXMFSYSCONFIG", "TEXMFVAR", "TEXMFCONFIG" };
+
+        auto kpse = findOnPath("kpsewhich");
+        if (!kpse)
+            return std::vector<fs::path> { };
+
+        std::string cacheKey = "v1|" + kpse->string() + "|" + fileStampToken(*kpse);
+        for (auto var : kVars) {
+            cacheKey += '|';
+            if (const char* v = std::getenv(std::string(var).c_str()))
+                cacheKey += v;
+        }
+        if (const char* cnf = std::getenv("TEXMFCNF")) {
+            cacheKey += '|';
+            cacheKey += cnf;
+        }
+
+        const fs::path dir = cacheDir();
+        const fs::path cacheFile = dir.empty() ? fs::path { } : dir / "tex_roots.cache";
+        if (!cacheFile.empty()) {
+            std::ifstream in(cacheFile);
+            std::string header;
+            if (std::getline(in, header) && header == cacheKey) {
+                std::vector<fs::path> cached;
+                std::string line;
+                while (std::getline(in, line))
+                    if (!line.empty())
+                        cached.emplace_back(std::move(line));
+                return cached;
+            }
+        }
+
         std::string query = "-expand-var=";
         for (auto var : kVars) {
             query += '$';
@@ -63,7 +144,7 @@ std::vector<fs::path> texSystemRoots()
         }
         std::vector<fs::path> found;
         try {
-            std::vector<std::string> args { "kpsewhich", query };
+            std::vector<std::string> args { kpse->string(), query };
             auto result = Process(args).wait();
             if (result.exitCode != 0)
                 return found;
@@ -86,6 +167,24 @@ std::vector<fs::path> texSystemRoots()
             }
         } catch (const std::system_error&) {
             // kpsewhich not installed or not executable: nothing to ignore.
+            return found;
+        }
+
+        // Persist best-effort via temp file + atomic rename.
+        if (!cacheFile.empty()) {
+            std::error_code ec;
+            fs::create_directories(dir, ec);
+            fs::path tmp = cacheFile;
+            tmp += ".tmp-" + std::to_string(::getpid());
+            {
+                std::ofstream out(tmp);
+                out << cacheKey << '\n';
+                for (const auto& p : found)
+                    out << p.string() << '\n';
+            }
+            fs::rename(tmp, cacheFile, ec);
+            if (ec)
+                fs::remove(tmp, ec);
         }
         return found;
     }();
@@ -201,6 +300,8 @@ namespace {
         fp += options.synctex ? '1' : '0';
         fp += ";haltOnError=";
         fp += options.haltOnError ? '1' : '0';
+        fp += ";preambleCache=";
+        fp += options.preambleCache ? '1' : '0';
         fp += ";werror=";
         fp += options.diagnosticPolicy.warningsAsErrors ? '1' : '0';
         for (const auto& f : options.diagnosticPolicy.failOn) {
@@ -456,6 +557,194 @@ namespace {
         return preamble;
     }
 
+    // True when a cold build of texFile will almost certainly take >= 2 passes,
+    // so running pass 1 with -draftmode saves PDF generation without adding an
+    // extra pass.
+    bool likelyMultiPassColdBuild(const fs::path& texFile, const fs::path& auxFile)
+    {
+        std::error_code ec;
+        if (fs::exists(auxFile, ec))
+            return false; // warm build: often finishes in 1 pass
+        std::ifstream in(texFile);
+        if (!in)
+            return false;
+        std::string text;
+        std::string line;
+        while (std::getline(in, line) && text.size() < 256 * 1024) {
+            // Strip simple comments so commented \tableofcontents doesn't count.
+            auto pct = line.find('%');
+            text += line.substr(0, pct);
+            text += '\n';
+        }
+        if (text.contains("\\tableofcontents") || text.contains("\\listoffigures")
+            || text.contains("\\listoftables") || text.contains("\\bibliography{")
+            || text.contains("{biblatex}") || text.contains("\\makeindex")
+            || text.contains("\\makeglossaries") || text.contains("\\makenomenclature")
+            || text.contains("{pythontex}"))
+            return true;
+        bool hasLabel = text.contains("\\label{");
+        bool hasRef = text.contains("\\ref{") || text.contains("\\pageref{")
+            || text.contains("\\cref{") || text.contains("\\autoref{");
+        return hasLabel && hasRef;
+    }
+
+    // Extracts everything strictly before `\begin{document}` from texFile, or
+    // nullopt if the document is unsuitable for precompiled format dumping
+    // (no \begin{document}, or a \begin{...} inside the preamble).
+    std::optional<std::string> extractDumpablePreamble(const fs::path& texFile)
+    {
+        std::ifstream in(texFile);
+        if (!in)
+            return std::nullopt;
+        std::string preamble;
+        std::string line;
+        bool foundBeginDoc = false;
+        while (std::getline(in, line)) {
+            auto pct = line.find('%');
+            auto code = std::string_view(line).substr(0, pct);
+            auto pos = code.find("\\begin{document}");
+            if (pos != std::string_view::npos) {
+                preamble += code.substr(0, pos);
+                foundBeginDoc = true;
+                break;
+            }
+            if (code.contains("\\begin{"))
+                return std::nullopt; // preamble uses \begin{...}; skip safely
+            preamble += line;
+            preamble += '\n';
+        }
+        if (!foundBeginDoc || preamble.empty())
+            return std::nullopt;
+        // minted runs shell-escape hooks during package load; skip .fmt cache.
+        if (preamble.contains("{minted}"))
+            return std::nullopt;
+        return preamble;
+    }
+
+    std::string hexDigest(const Hash& h)
+    {
+        static constexpr char kHex[] = "0123456789abcdef";
+        std::string out;
+        out.reserve(h.size() * 2);
+        for (uint8_t b : h) {
+            out.push_back(kHex[b >> 4]);
+            out.push_back(kHex[b & 0x0f]);
+        }
+        return out;
+    }
+
+    // Builds (or reuses) `<outDir>/<job>-preamble.fmt` for pdflatex. Returns
+    // the format name ("<job>-preamble") on success, or empty to fall back to
+    // a normal compilation.
+    std::string preparePreambleFormat(const BuildOptions& options,
+        const EngineArguments& engineArguments,
+        const fs::path& outDir,
+        const std::string& resolvedJob,
+        const std::vector<std::pair<std::string, std::string>>& extraEnv,
+        StateDatabase& stateDb,
+        Blake3Hasher& hasher)
+    {
+        auto preambleText = extractDumpablePreamble(options.texFile);
+        if (!preambleText)
+            return { };
+
+        const std::string fmtName = resolvedJob + "-preamble";
+        const fs::path fmtPath = outDir / (fmtName + ".fmt");
+        const fs::path fmtFls = outDir / (fmtName + ".fls");
+        const fs::path preambleTex = outDir / ("." + resolvedJob + "-preamble.tex");
+
+        // Preamble cache key: preamble text + engine binary + flags + all
+        // project-local files the previous -ini dump read (.cls, .sty, \input).
+        auto computeKey = [&] {
+            std::string material = "fmt-v1\n";
+            material += engineArguments.program;
+            material += '\n';
+            material += options.shellEscape ? "1\n" : "0\n";
+            for (const auto& opt : engineArguments.extraOptions) {
+                material += opt;
+                material += '\n';
+            }
+            for (const auto& [k, v] : extraEnv) {
+                material += k;
+                material += '=';
+                material += v;
+                material += '\n';
+            }
+            material += "---\n";
+            material += *preambleText;
+            material += "\n---\n";
+            std::error_code ec;
+            if (fs::is_regular_file(fmtFls, ec)) {
+                auto rec = projectFlsParser(options.texFile.parent_path(), texSystemRoots())
+                               .parse(fmtFls);
+                if (rec) {
+                    auto selfCanon = fs::weakly_canonical(preambleTex, ec);
+                    for (const auto& inp : rec->inputs) {
+                        if (fs::weakly_canonical(inp, ec) == selfCanon)
+                            continue;
+                        if (auto h = hasher.hashFile(inp, std::nullopt)) {
+                            material += inp.string();
+                            material += '=';
+                            material += hexDigest(*h);
+                            material += '\n';
+                        } else {
+                            material += inp.string();
+                            material += "=MISSING\n";
+                        }
+                    }
+                }
+            }
+            return hexDigest(hasher.hashBytes(material));
+        };
+
+        std::error_code ec;
+        const std::string keyBefore = computeKey();
+        if (fs::is_regular_file(fmtPath, ec) && fs::is_regular_file(fmtFls, ec)) {
+            if (auto stored = stateDb.getJobMeta(resolvedJob, "preamble_fmt_key");
+                stored && *stored == keyBefore)
+                return fmtName;
+        }
+
+        // Write preamble wrapper + \dump and run `pdflatex -ini`.
+        {
+            std::ofstream out(preambleTex, std::ios::binary | std::ios::trunc);
+            out << *preambleText << "\n\\dump\n";
+        }
+        std::string bin = engineArguments.program.empty()
+            ? std::string("pdflatex")
+            : engineArguments.program;
+        std::vector<std::string> args {
+            bin,
+            "-ini",
+            "-recorder",
+            "-interaction=nonstopmode",
+            "-halt-on-error",
+            "-output-directory=" + outDir.string(),
+            "-jobname=" + fmtName,
+        };
+        if (options.shellEscape)
+            args.emplace_back("-shell-escape");
+        args.emplace_back("&pdflatex");
+        args.emplace_back("\\input{\"" + preambleTex.string() + "\"}");
+
+        try {
+            auto r = Process(args, options.texFile.parent_path(), extraEnv)
+                         .wait(WaitLimits {
+                             .timeout = options.processTimeout,
+                             .stop = options.stopToken,
+                         });
+            if (r.exitCode != 0 || !fs::is_regular_file(fmtPath, ec)) {
+                fs::remove(fmtPath, ec);
+                return { };
+            }
+        } catch (const std::system_error&) {
+            return { };
+        }
+
+        stateDb.setJobMeta(resolvedJob, "preamble_fmt_key", computeKey());
+        return fmtName;
+    }
+
     BuildResult buildWith(const BuildOptions& options, EngineKind engineKind,
         bool suppressResetNotice = false)
     {
@@ -479,6 +768,7 @@ namespace {
         for (const auto& recipe : options.customTools)
             tools.push_back(std::make_unique<HashTriggeredTool>(recipe));
 
+        auto extraEnv = resolvedEnv(options);
         EngineInvocation inv {
             .texFile = options.texFile,
             .outputDir = outDir,
@@ -486,9 +776,7 @@ namespace {
             .haltOnError = options.haltOnError,
             .shellEscape = options.shellEscape,
             .synctex = options.synctex,
-            .preamble = buildPreambleHooks(options.texFile, outDir, engineKind,
-                engineArguments.program, options.shellEscape),
-            .extraEnv = resolvedEnv(options),
+            .extraEnv = extraEnv,
         };
 
         // Held until the build returns: a second maketex building this
@@ -505,10 +793,33 @@ namespace {
                 .jobName = inv.resolvedJobName(),
             });
 
+        // Precompiled preamble format (.fmt) for pdflatex: dumped once when
+        // the preamble (or any \input'd preamble file) changes, and reused on
+        // body-only edits.
+        if (options.preambleCache && engineKind == EngineKind::PdfLaTeX) {
+            if (auto fmt = preparePreambleFormat(options, engineArguments, outDir,
+                    inv.resolvedJobName(), extraEnv, stateDb, hasher);
+                !fmt.empty()) {
+                inv.formatName = std::move(fmt);
+                inv.skipPreamble = true;
+                std::string texFormats = outDir.string() + ":";
+                if (const char* inherited = std::getenv("TEXFORMATS"); inherited && *inherited)
+                    texFormats += inherited;
+                inv.extraEnv.emplace_back("TEXFORMATS", std::move(texFormats));
+            }
+        }
+
         std::vector<ITool*> toolPtrs;
         toolPtrs.reserve(tools.size());
         for (auto& t : tools)
             toolPtrs.push_back(t.get());
+
+        const bool useXdvSplit = engineKind == EngineKind::XeLaTeX
+            && findOnPath("xdvipdfmx").has_value();
+        const bool draftFirst = !useXdvSplit
+            && (engineKind == EngineKind::PdfLaTeX || engineKind == EngineKind::LuaLaTeX)
+            && options.maxPasses >= 2
+            && likelyMultiPassColdBuild(options.texFile, inv.jobFile(".aux"));
 
         BuildDriver::Config driverConfig {
             .maxPasses = options.maxPasses,
@@ -520,6 +831,11 @@ namespace {
                 .stop = options.stopToken,
             },
             .diagnosticPolicy = options.diagnosticPolicy,
+            .preambleProvider = [texFile = options.texFile, outDir, engineKind, prog = engineArguments.program, shellEscape = options.shellEscape] {
+                return buildPreambleHooks(texFile, outDir, engineKind, prog, shellEscape);
+            },
+            .draftFirstPass = draftFirst,
+            .xelatexXdvSplit = useXdvSplit,
         };
         if (!options.contentFilters.empty()) {
             // Merge user filters with built-in defaults for the same extension
@@ -555,14 +871,52 @@ namespace {
                                "started from a full rebuild",
                 });
 
-        // Unconditional on success — also after an up-to-date skip, which
-        // covers a published PDF the user deleted while the build state
-        // stayed current.
-        if (result.success && options.usesDefaultOutputDir())
-            result.published = publishArtifacts(outDir, options.texFile.parent_path(),
-                inv.resolvedJobName());
-        else if (result.success)
+        // On up-to-date runs, avoid re-reading large PDFs byte-for-byte when
+        // both the internal and published copies still match their recorded
+        // (size, mtime) stamps. If the user deleted or modified the published
+        // copy, the stamp check misses and publishArtifacts republishes it.
+        if (result.success && options.usesDefaultOutputDir()) {
+            const fs::path destDir = options.texFile.parent_path();
+            const std::string resolvedJob = inv.resolvedJobName();
+            auto currentStamp = [&] {
+                std::string stamp;
+                for (const char* ext : { ".pdf", ".synctex.gz" }) {
+                    fs::path src = outDir / (resolvedJob + ext);
+                    fs::path dest = destDir / (resolvedJob + ext);
+                    std::error_code ec;
+                    if (!fs::is_regular_file(src, ec))
+                        continue;
+                    auto sTok = fileStampToken(src);
+                    auto dTok = fileStampToken(dest);
+                    if (sTok.empty() || dTok.empty())
+                        return std::string { }; // missing published file
+                    stamp += ext;
+                    stamp += '=';
+                    stamp += sTok;
+                    stamp += '/';
+                    stamp += dTok;
+                    stamp += ';';
+                }
+                return stamp;
+            };
+
+            auto recorded = stateDb.getJobMeta(resolvedJob, "published_stamp");
+            auto nowStamp = result.upToDate ? currentStamp() : std::string { };
+            if (result.upToDate && recorded && !nowStamp.empty() && *recorded == nowStamp) {
+                for (const char* ext : { ".pdf", ".synctex.gz" }) {
+                    fs::path dest = destDir / (resolvedJob + ext);
+                    std::error_code ec;
+                    if (fs::is_regular_file(dest, ec))
+                        result.published.push_back(std::move(dest));
+                }
+            } else {
+                result.published = publishArtifacts(outDir, destDir, resolvedJob);
+                if (auto fresh = currentStamp(); !fresh.empty())
+                    stateDb.setJobMeta(resolvedJob, "published_stamp", fresh);
+            }
+        } else if (result.success) {
             result.published.push_back(inv.jobFile(".pdf"));
+        }
         return result;
     }
 
@@ -755,6 +1109,23 @@ std::optional<BuildFileSets> scanBuildFiles(const BuildOptions& options)
     systemRootsCanonical.reserve(systemRoots.size());
     for (const auto& r : systemRoots)
         systemRootsCanonical.push_back(safeCanonical(r));
+
+    // When a precompiled preamble format was used, local files loaded inside
+    // the preamble (e.g. shared/preamble.tex, custom.cls) are recorded in
+    // `<job>-preamble.fls` rather than `<job>.fls`. Include them as sources so
+    // `maketex watch` rebuilds when preamble files change.
+    if (auto fmtFls = inv.outputDir / (inv.resolvedJobName() + "-preamble.fls");
+        fs::exists(fmtFls)) {
+        if (auto fmtRec = flsParser.parse(fmtFls)) {
+            for (const auto& p : fmtRec->inputs) {
+                auto canon = safeCanonical(p);
+                if (outputPaths.contains(canon.string()) || isUnder(canon, outDirCanonical))
+                    continue;
+                if (seenSources.insert(canon.string()).second)
+                    sets.sources.push_back(std::move(canon));
+            }
+        }
+    }
 
     auto logFile = inv.jobFile(".log");
     auto auxFile = inv.jobFile(".aux");

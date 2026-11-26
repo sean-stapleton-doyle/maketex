@@ -95,6 +95,16 @@ public:
             { "aux", std::regex { R"(^\\@writefile\{)" } },
         };
         DiagnosticPolicy diagnosticPolicy;
+        // Computed lazily only when an engine pass is actually needed (skipped
+        // entirely on up-to-date and tool-only runs).
+        std::function<std::string()> preambleProvider;
+        // Run pass 1 with -draftmode (pdflatex/lualatex) when the build is
+        // cold and expected to take multiple passes. If pass 1 unexpectedly
+        // converges, an automatic non-draft pass runs to produce the PDF.
+        bool draftFirstPass = false;
+        // For XeLaTeX: run every engine pass with -no-pdf (emitting .xdv) and
+        // invoke xdvipdfmx once after convergence.
+        bool xelatexXdvSplit = false;
     };
 
     // engine, db, and hasher are non-owning — caller must ensure they
@@ -220,6 +230,9 @@ private:
     WaitLimits m_processLimits;
     std::vector<std::pair<std::string, std::regex>> m_contentFilters;
     DiagnosticPolicy m_diagnosticPolicy;
+    std::function<std::string()> m_preambleProvider;
+    bool m_draftFirstPass = false;
+    bool m_xelatexXdvSplit = false;
 
     BuildGraph m_graph;
 };

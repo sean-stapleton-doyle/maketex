@@ -5,6 +5,7 @@ namespace maketex {
 enum class InvokerKind { PdfLaTeX,
     XeLaTeX,
     LuaLaTeX,
+    Xdvipdfmx,
     Bibtex,
     Biber,
     Makeindex,
