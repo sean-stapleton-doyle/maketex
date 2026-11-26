@@ -3,6 +3,7 @@
 ## Overview
 
 - [Usage](USAGE.md) — the `maketex` command line: build, watch, clean
+- [Editors](editors.md) — VS Code (LaTeX Workshop), Neovim (VimTeX), Zed, Emacs (AUCTeX), TeXstudio
 - [CI](ci.md) — caching `.maketex/`, `--format=github`/`json`, GitHub Actions recipe
 - [Packaging](packaging.md) — Homebrew tap, AUR (`maketex-bin`), and `curl | sh` installer setup
 - [Architecture](architecture.md) — layer diagram, data flow, type system, key design decisions

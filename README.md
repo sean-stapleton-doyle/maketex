@@ -9,6 +9,20 @@
 
 A modern, zero-config C++ replacement for `latexmk`. Run `maketex` in a LaTeX project and it finds the root document, picks the right engine, drives auxiliary tools until convergence, hides build clutter in `.maketex/`, installs missing TeX Live packages, and prints clean compiler-style diagnostics.
 
+<br />
+
+![maketex CLI demo](docs/assets/demo.gif)
+
+</div>
+
+## Live watch mode
+
+`maketex watch` uses native OS file notifications (`kqueue` on macOS, `inotify` on Linux) to rebuild immediately on save and show live diagnostics in a full-screen TUI:
+
+<div align="center">
+
+![maketex watch TUI demo](docs/assets/watch.gif)
+
 </div>
 
 ## Quick start
@@ -102,6 +116,7 @@ make help                                   # list all Makefile targets (format,
 ## Documentation
 
 - [Usage guide](docs/USAGE.md)
+- [Editor integrations](docs/editors.md) — VS Code (LaTeX Workshop), Neovim (VimTeX), Zed, Emacs (AUCTeX), TeXstudio
 - [Configuration (`maketex.toml`)](docs/configuration.md)
 - [CI integration](docs/ci.md)
 - [Packaging & distribution](docs/packaging.md)
