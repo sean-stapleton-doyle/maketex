@@ -1,5 +1,6 @@
 # Build tree
 build/
+build-*/
 .cache/
 compile_commands.json
 

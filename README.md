@@ -32,16 +32,19 @@ Download the archive for your platform (`macos-arm64`, `macos-x86_64`, `linux-x8
 Requires a C++26-capable compiler (Clang / GCC 14+), CMake 3.25+ (newer CMake on GCC 14+ for C++26), and Ninja or Make. Dependencies are fetched automatically via CPM.
 
 ```sh
-cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release
-cmake --build build
-cmake --install build --component maketex   # installs `maketex` into CMAKE_INSTALL_BINDIR
+make release                                # build optimized Release binary
+make install PREFIX=/usr/local              # install stripped `maketex` binary
 ```
 
 Run tests:
 
 ```sh
-ctest --test-dir build --output-on-failure -j 4
+make test                                   # full suite (unit + integration + e2e)
+make test-unit                              # fast unit tests only
+make help                                   # list all Makefile targets (format, release, tag-release, ...)
 ```
+
+*(You can also invoke CMake directly: `cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release && cmake --build build && cmake --install build --component maketex`.)*
 
 ## Documentation
 
