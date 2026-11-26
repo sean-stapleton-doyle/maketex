@@ -1,13 +1,8 @@
-# maketex in CI
+# CI Integration
 
-maketex is designed to be dropped into a pipeline without ceremony: one
-binary, one command, machine-readable output, and a build cache that
-survives being restored on a different runner.
-
-## The short version
+## GitHub Actions example
 
 ```yaml
-# .github/workflows/paper.yml
 jobs:
   paper:
     runs-on: ubuntu-latest
@@ -18,7 +13,7 @@ jobs:
           path: paper/.maketex
           key: maketex-${{ runner.os }}-${{ hashFiles('paper/**/*.tex', 'paper/**/*.bib') }}
           restore-keys: maketex-${{ runner.os }}-
-      # ... install TeX Live or use a texlive container ...
+      # Install TeX Live or run inside a TeX Live container
       - run: maketex build paper/main.tex --format=github
       - uses: actions/upload-artifact@v4
         with:
@@ -26,42 +21,23 @@ jobs:
           path: paper/main.pdf
 ```
 
-## What to cache
+## Caching `.maketex/`
 
-Cache the `.maketex/` directory next to your root document. It contains
-everything an incremental rebuild needs: the state database (file hashes,
-rule records, the build manifest) and the engine's recorder/aux outputs.
+Cache the `.maketex/` folder beside your root `.tex` file. It holds the SQLite state database and aux files.
 
-Properties that make this safe:
+- **Path-portable**: paths are stored relative to the document directory, so a restored cache hits even at a different checkout path.
+- **mtime-independent**: `maketex` verifies BLAKE3 content hashes after a fresh checkout and exits `up to date` if files match.
+- **Self-invalidating**: changing `maketex` version, engine, tools, or flags automatically resets the database to a clean rebuild. Include the TeX Live version in your cache key if TeX Live upgrades should trigger a rebuild.
 
-- **Path-portable.** Paths are stored relative to the document's
-  directory, and the recorder file is re-rooted on parse, so a cache
-  restored at a different absolute checkout path still hits. Sources
-  outside the document's directory fall back to absolute paths and simply
-  rebuild after a move — never a wrong result.
-- **Self-invalidating.** The database carries a manifest (schema version
-  plus a fingerprint of the engine, tool roster, and build flags). A cache
-  from an incompatible maketex version or different build options is
-  detected on open and reset — you get a clean full build and a `note:`
-  diagnostic, not silent misbehaviour. Files inside the TeX distribution
-  are not tracked, so a TeX Live upgrade alone does **not** invalidate the
-  cache: include the TeX Live version in your cache key (see
-  [Cache keys](#cache-keys)) if you want a rebuild after upgrading.
-- **mtime-independent.** A fresh checkout gives every file a new mtime.
-  maketex's fast path misses, falls back to BLAKE3 content hashing, finds
-  the hashes unchanged, and still exits "up to date". Restoring a cache
-  costs one hashing pass, not a rebuild.
+## Output formats
 
-## Machine-readable output
+### GitHub PR annotations (`--format=github`)
 
-`--format=github` emits one [workflow command] per diagnostic —
-`::error file=chapters/ch1.tex,line=12,title=LaTeX::Undefined control
-sequence` — which GitHub renders as inline annotations on the PR diff.
-Warnings (undefined citations, overfull boxes, package warnings) become
-`::warning` annotations.
+Emits `::error` and `::warning` workflow commands (`::error file=chapters/ch1.tex,line=12,title=LaTeX::...`) that show inline on pull request diffs.
 
-`--format=json` prints exactly one JSON document on stdout (notices go to
-stderr), suitable for any other CI system or tooling:
+### JSON (`--format=json`)
+
+Prints one JSON object on stdout (notices go to stderr):
 
 ```json
 {
@@ -89,28 +65,6 @@ stderr), suitable for any other CI system or tooling:
 }
 ```
 
-`category` is a stable machine tag — match on it rather than on message
-text: `undefined-citation`, `undefined-reference`, `duplicate-label`,
-`undefined-macro`, `missing-file`, `missing-tool`, `missing-font`,
-`missing-glyph`, `shell-escape-required`, `package`, `class`, `font`,
-`pdftex`, `overfull-hbox`, `overfull-vbox`, `underfull-hbox`,
-`underfull-vbox`, `timeout`, `cancelled`, `environment`. `hint` is an
-actionable next step (an install command, a flag to add) or `null`. `pdf`
-is the published PDF, or `null` when none was produced or it could not be
-published.
+Match on the stable `category` field (`undefined-citation`, `undefined-reference`, `duplicate-label`, `undefined-macro`, `missing-file`, `missing-tool`, `missing-font`, `missing-glyph`, `shell-escape-required`, `package`, `class`, `font`, `pdftex`, `overfull-hbox`, `overfull-vbox`, `underfull-hbox`, `underfull-vbox`, `timeout`, `cancelled`, `environment`).
 
-Exit codes: `0` success, `1` the document did not build, `2` usage or
-configuration error, `3` environment error (engine or tool not installed,
-database or file system trouble).
-
-[workflow command]: https://docs.github.com/en/actions/using-workflows/workflow-commands-for-github-actions
-
-## Cache keys
-
-The `hashFiles(...)` key above gives an exact hit when sources are
-unchanged and falls back to the newest previous cache (`restore-keys`)
-otherwise — maketex then rebuilds only what the changed files invalidate.
-Include the TeX Live version in the key (for example, from `kpsewhich
---version`) if a distribution upgrade should rebuild the document. maketex
-doesn't track files inside the distribution, so without it a restored
-cache counts as up to date even when the packages it used have changed.
+Exit codes: `0` success, `1` build failed, `2` usage/config error, `3` environment error.
