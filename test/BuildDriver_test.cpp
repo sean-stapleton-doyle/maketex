@@ -1142,20 +1142,32 @@ TEST_F(BuildDriverTest, draftFirstPassRunsPass1DraftAndFinalizesPdf)
 
 TEST_F(BuildDriverTest, independentToolsRunInParallel)
 {
-    class TimedTool final : public maketex::ITool {
+    // Prove true concurrency with a filesystem rendezvous barrier instead of a
+    // wall-clock threshold: each tool creates its own marker and waits for the
+    // peer's marker before writing its output. Sequential execution would
+    // time out waiting for the peer and exit non-zero.
+    class BarrierTool final : public maketex::ITool {
     public:
-        TimedTool(std::string name, fs::path trigger, fs::path output)
+        BarrierTool(std::string name, fs::path trigger, fs::path output,
+            fs::path myMarker, fs::path peerMarker)
             : m_name(std::move(name))
             , m_trigger(std::move(trigger))
             , m_output(std::move(output))
+            , m_myMarker(std::move(myMarker))
+            , m_peerMarker(std::move(peerMarker))
         {
         }
         std::string_view name() const override { return m_name; }
         InvokerKind invokerKind() const override { return InvokerKind::Custom; }
         std::vector<std::string> buildArgs(const ToolInvocation&) const override
         {
-            return { "/bin/sh", "-c",
-                "sleep 0.25 && printf 'ok' > '" + m_output.string() + "'" };
+            std::string script = "touch '" + m_myMarker.string() + "'; "
+                                                                   "i=0; while [ ! -f '"
+                + m_peerMarker.string() + "' ]; do "
+                                          "i=$((i + 1)); [ $i -ge 200 ] && exit 1; sleep 0.02; done; "
+                                          "printf 'ok' > '"
+                + m_output.string() + "'";
+            return { "/bin/sh", "-c", std::move(script) };
         }
         bool applies(const ToolContext& ctx) const override { return ctx.wrote(m_trigger); }
         std::vector<maketex::ToolInput> inputs(const ToolContext&) const override
@@ -1168,12 +1180,16 @@ TEST_F(BuildDriverTest, independentToolsRunInParallel)
         std::string m_name;
         fs::path m_trigger;
         fs::path m_output;
+        fs::path m_myMarker;
+        fs::path m_peerMarker;
     };
 
     const fs::path trigA = m_dir / "main.idx";
     const fs::path trigB = m_dir / "main.nlo";
     const fs::path outA = m_dir / "main.ind";
     const fs::path outB = m_dir / "main.nls";
+    const fs::path markA = m_dir / "a.started";
+    const fs::path markB = m_dir / "b.started";
     auto fls = flsWithTex() + "OUTPUT " + trigA.string() + "\nOUTPUT " + trigB.string() + "\n";
 
     FakeEngine engine({
@@ -1182,20 +1198,14 @@ TEST_F(BuildDriverTest, independentToolsRunInParallel)
         FakeCall { .writes = { { m_dir / "main.fls", fls }, { m_dir / "main.log", "This is pdfTeX\n" },
                        { trigA, "a" }, { trigB, "b" } } },
     });
-    TimedTool toolA("toolA", trigA, outA);
-    TimedTool toolB("toolB", trigB, outB);
+    BarrierTool toolA("toolA", trigA, outA, markA, markB);
+    BarrierTool toolB("toolB", trigB, outB, markB, markA);
 
-    auto start = std::chrono::steady_clock::now();
     auto res = BuildDriver(engine, m_db, m_hasher, makeInv(), { .tools = { &toolA, &toolB } }).run();
-    auto elapsedMs = std::chrono::duration_cast<std::chrono::milliseconds>(
-        std::chrono::steady_clock::now() - start)
-                         .count();
 
     ASSERT_TRUE(res.success) << res.lastError;
     EXPECT_TRUE(fs::exists(outA));
     EXPECT_TRUE(fs::exists(outB));
-    // Two 250 ms tools run in parallel: should finish well under 450 ms.
-    EXPECT_LT(elapsedMs, 450) << "tools appear to have run sequentially (" << elapsedMs << " ms)";
 }
 
 TEST_F(BuildDriverTest, dependentToolsRunInSeparateWaves)
