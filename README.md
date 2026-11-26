@@ -22,9 +22,6 @@ brew install sean-stapleton-doyle/tap/maketex
 
 # Shell installer (macOS & Linux)
 curl -fsSL https://raw.githubusercontent.com/sean-stapleton-doyle/maketex/main/scripts/install.sh | sh
-
-# Arch Linux (AUR)
-yay -S maketex-bin
 ```
 
 Prebuilt tarballs are on [GitHub Releases](https://github.com/sean-stapleton-doyle/maketex/releases). To build from source (C++26, CMake 3.25+):
