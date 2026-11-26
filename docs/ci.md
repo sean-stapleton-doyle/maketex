@@ -7,15 +7,15 @@ jobs:
   paper:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/cache@v4
+      - uses: actions/checkout@v7
+      - uses: actions/cache@v6
         with:
           path: paper/.maketex
           key: maketex-${{ runner.os }}-${{ hashFiles('paper/**/*.tex', 'paper/**/*.bib') }}
           restore-keys: maketex-${{ runner.os }}-
       # Install TeX Live or run inside a TeX Live container
       - run: maketex build paper/main.tex --format=github
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: paper
           path: paper/main.pdf

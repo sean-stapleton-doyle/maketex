@@ -23,7 +23,7 @@ jobs:
   linux:
     runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Install toolchain and TeX Live
         run: |
@@ -37,7 +37,7 @@ jobs:
             python3-pygments python-is-python3 ghostscript texlive-font-utils
 
       - name: Cache pipx tools (cmake)
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: |
             ~/.local/share/pipx
@@ -54,7 +54,7 @@ jobs:
           echo "$HOME/.local/bin" >> "$GITHUB_PATH"
 
       - name: Cache CPM sources
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: ~/.cache/CPM
           key: cpm-${{ runner.os }}-${{ hashFiles('CMakeLists.txt', 'cli/CMakeLists.txt') }}
@@ -62,7 +62,7 @@ jobs:
             cpm-${{ runner.os }}-
 
       - name: Cache ccache
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: ~/.cache/ccache
           key: ccache-ci-${{ runner.os }}-${{ runner.arch }}-debug-${{ github.sha }}
@@ -101,7 +101,7 @@ jobs:
   macos:
     runs-on: macos-15
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Install toolchain
         env:
@@ -110,7 +110,7 @@ jobs:
         run: brew install ninja ccache
 
       - name: Cache CPM sources
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: ~/.cache/CPM
           key: cpm-${{ runner.os }}-${{ hashFiles('CMakeLists.txt', 'cli/CMakeLists.txt') }}
@@ -118,7 +118,7 @@ jobs:
             cpm-${{ runner.os }}-
 
       - name: Cache ccache
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: ~/.cache/ccache
           key: ccache-ci-${{ runner.os }}-${{ runner.arch }}-debug-${{ github.sha }}
@@ -149,10 +149,10 @@ jobs:
   format:
     runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Cache pipx tools (clang-format)
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: |
             ~/.local/share/pipx
