@@ -6,7 +6,7 @@
 [![Release](https://img.shields.io/github/v/release/sean-stapleton-doyle/maketex)](https://github.com/sean-stapleton-doyle/maketex/releases/latest)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue)](LICENSE)
 
-A fast, zero-config C++ replacement for `latexmk`. Run `maketex` in any LaTeX folder—no flags or setup needed. See [examples/](examples/) for multi-chapter projects, custom tools, and advanced configs.
+A fast, zero-config C++ replacement for `latexmk`. Run `maketex` in any LaTeX folder, no flags or setup needed. If you need a custom workflow, or want to see what `maketex` is capable of, please see [examples/](examples/) for multi-chapter projects, custom tools, and advanced configs.
 
 <br />
 
@@ -34,11 +34,11 @@ make release && make install PREFIX=/usr/local
 
 ```sh
 cd my-paper
-maketex                   # build once and publish main.pdf
-maketex --preamble-cache  # cache pdflatex preamble (.fmt) for faster edits
-maketex watch             # rebuild on save (kqueue / inotify)
-maketex doctor            # check engines, tools, and packages
-maketex clean             # remove aux files (keep PDF; --all removes everything)
+maketex                    # build once and publish main.pdf
+maketex --preamble-cache   # cache pdflatex preamble (.fmt) for faster edits
+maketex watch              # rebuild on save (kqueue / inotify)
+maketex doctor             # check engines, tools, and packages
+maketex clean              # remove aux files (keep PDF; --all removes everything)
 ```
 
 ## Features
