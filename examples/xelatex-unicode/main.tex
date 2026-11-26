@@ -1,0 +1,19 @@
+% !TeX program = xelatex
+\documentclass{article}
+
+\title{XeLaTeX Example}
+\author{maketex}
+
+\begin{document}
+\maketitle
+\tableofcontents
+
+\section{Overview}\label{sec:overview}
+\texttt{maketex} reads the magic comment above, runs \texttt{xelatex -no-pdf}
+until references converge, and calls \texttt{xdvipdfmx} once at the end.
+See Section~\ref{sec:details}.
+
+\section{Details}\label{sec:details}
+Back to Section~\ref{sec:overview}.
+
+\end{document}

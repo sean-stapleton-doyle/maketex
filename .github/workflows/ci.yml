@@ -8,12 +8,14 @@ on:
       - 'LICENSE'
       - 'docs/**'
       - 'demo/**'
+      - 'examples/**'
   pull_request:
     paths-ignore:
       - '**.md'
       - 'LICENSE'
       - 'docs/**'
       - 'demo/**'
+      - 'examples/**'
 
 jobs:
   # Unit tests plus the integration suite against a full TeX Live, so every

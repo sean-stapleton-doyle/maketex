@@ -1,0 +1,13 @@
+# Run a custom auxiliary tool whenever LaTeX writes `$job.items`.
+# The tool sorts the entries into `$job.sorted` for the next pass.
+main = "main.tex"
+
+[env]
+LC_ALL = "C"
+
+[[tool]]
+name = "sort-items"
+command = ["sh", "-c", "sort \"$1\" > \"$2\"", "_", "$job.items", "$job.sorted"]
+triggers = [".items"]
+outputs = [".sorted"]
+working-dir = "output"

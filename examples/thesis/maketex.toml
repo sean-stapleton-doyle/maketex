@@ -1,0 +1,10 @@
+# Multi-chapter thesis configuration
+main = "thesis.tex"
+jobname = "my-thesis"
+texinputs = ["styles"]
+preamble-cache = true
+
+[diagnostics]
+warnings-as-errors = false
+fail-on = ["undefined-citation", "undefined-reference"]
+ignore = ["overfull-hbox"]

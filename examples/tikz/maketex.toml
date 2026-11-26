@@ -1,0 +1,3 @@
+# Enable shell-escape so TikZ can externalize and cache figures inside .maketex/.
+main = "main.tex"
+shell-escape = true

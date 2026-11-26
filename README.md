@@ -6,7 +6,7 @@
 [![Release](https://img.shields.io/github/v/release/sean-stapleton-doyle/maketex)](https://github.com/sean-stapleton-doyle/maketex/releases/latest)
 [![License: MIT](https://img.shields.io/github/license/sean-stapleton-doyle/maketex)](LICENSE)
 
-A fast, zero-config C++ replacement for `latexmk`.
+A fast, zero-config C++ replacement for `latexmk`. Run `maketex` in any LaTeX folder—no flags or setup needed. See [examples/](examples/) for multi-chapter projects, custom tools, and advanced configs.
 
 <br />
 
@@ -88,6 +88,7 @@ maketex clean             # remove aux files (keep PDF; --all removes everything
 
 ## Documentation
 
+- [Examples](examples/) — minimal, multi-chapter thesis, TikZ, XeLaTeX, and custom `[[tool]]` projects
 - [Usage guide](docs/USAGE.md)
 - [Editor setup](docs/editors.md) — VS Code, Neovim, Zed, Emacs, TeXstudio
 - [Configuration (`maketex.toml`)](docs/configuration.md)

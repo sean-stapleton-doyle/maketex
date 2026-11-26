@@ -2,6 +2,7 @@
 
 ## User guides
 
+- [Examples](../examples/) — minimal, multi-chapter thesis, XeLaTeX, and custom tool projects
 - [Usage](USAGE.md) — CLI commands, flags, watch mode, doctor, clean
 - [Editor setup](editors.md) — VS Code, Neovim, Zed, Emacs, TeXstudio
 - [Configuration](configuration.md) — `maketex.toml` discovery, schema, precedence
