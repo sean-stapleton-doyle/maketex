@@ -35,7 +35,46 @@ maketex clean           # remove aux files (keep PDF); add --all for a pristine 
 - **Clean diagnostics & CI support**: compiler-style terminal output with source snippets, `--format=json`, `--format=github` PR annotations, and configurable warning policies (`--warnings-as-errors`, `fail-on`, `ignore`).
 - **Powerful `maketex.toml` configuration**: declarative custom tools (`[[tool]]`), `texinputs`/`bibinputs`/`[env]`, `[content-filters]`, `[diagnostics]`, `preamble-cache`, and `jobname`.
 
+## Comparison
+
+| Feature | `maketex` | `latexmk` | `tectonic` |
+|---|---|---|---|
+| Uses standard TeX Live (`pdflatex`, `xelatex`, `lualatex`) | Yes | Yes | Own XeTeX-derived engine |
+| Full package & tool ecosystem (`minted`, `pythontex`, `biber`, `bib2gls`, TikZ) | Yes | Yes | Partial (no LuaTeX / shell-escape tools) |
+| Zero-config engine & root file detection | Yes | Manual flags / `.latexmkrc` | Single engine |
+| Keeps `.aux`/`.fls`/`.log` clutter out of project root by default | Yes (`.maketex/`) | No (needs `-outdir` + workarounds) | Yes |
+| Compiler-style diagnostics with source snippets | Yes | Raw TeX log output | Improved |
+| Content-hash incremental builds (BLAKE3 + SQLite) | Yes | MD5 + mtime | Content-based |
+| Multi-pass speedups (cold `-draftmode`, XeLaTeX `-no-pdf` split, parallel tools) | Yes | `-no-pdf` only | Single-engine |
+| Precompiled preamble `.fmt` caching with exact `file:line` errors | Yes (`--preamble-cache`) | No | No |
+| Native OS file watching (`kqueue` / `inotify`) | Yes (`maketex watch`) | Polling (`-pvc`) | No built-in watch |
+| Automatic TeX Live package installation (`tlmgr`) | Yes (batched) | No | Auto-downloads own bundle |
+| CI output (`--format=json`, `--format=github` PR annotations, warning policies) | Yes | No | No |
+| Runtime dependencies | Single native binary | Perl | Single native binary |
+
 ## Installation
+
+### Homebrew (macOS & Linux)
+
+```sh
+brew install sean-stapleton-doyle/tap/maketex
+```
+
+### Install script (macOS & Linux)
+
+Downloads the latest release archive for your OS/architecture, verifies its SHA-256 checksum, and installs `maketex` into `~/.local/bin`:
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/sean-stapleton-doyle/maketex/main/scripts/install.sh | sh
+```
+
+### Arch Linux (AUR)
+
+```sh
+yay -S maketex-bin
+# or
+paru -S maketex-bin
+```
 
 ### Prebuilt binaries
 
@@ -65,6 +104,7 @@ make help                                   # list all Makefile targets (format,
 - [Usage guide](docs/USAGE.md)
 - [Configuration (`maketex.toml`)](docs/configuration.md)
 - [CI integration](docs/ci.md)
+- [Packaging & distribution](docs/packaging.md)
 - [Architecture](docs/architecture.md)
 - [API & sandboxing design](docs/api_and_sandboxing_design.md)
 - [Known gaps & roadmap](docs/next-up.md)

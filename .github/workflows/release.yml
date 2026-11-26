@@ -136,6 +136,13 @@ jobs:
           sha256sum *.tar.gz > SHA256SUMS.txt
           cat SHA256SUMS.txt
 
+      - name: Upload checksums artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-checksums
+          path: dist/SHA256SUMS.txt
+          if-no-files-found: error
+
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
@@ -143,3 +150,108 @@ jobs:
           files: |
             dist/*.tar.gz
             dist/SHA256SUMS.txt
+
+  publish-homebrew:
+    needs: publish
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download release checksums
+        uses: actions/download-artifact@v4
+        with:
+          name: release-checksums
+          path: dist
+
+      - name: Render Homebrew formula
+        run: |
+          version="${GITHUB_REF_NAME#v}"
+          mkdir -p out/Formula
+          sh packaging/homebrew/render-formula.sh "$version" dist/SHA256SUMS.txt > out/Formula/maketex.rb
+          cat out/Formula/maketex.rb
+
+      - name: Upload rendered formula artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: homebrew-formula
+          path: out/Formula/maketex.rb
+
+      - name: Push to homebrew-tap
+        env:
+          TAP_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+        run: |
+          if [ -z "$TAP_TOKEN" ]; then
+            echo "::notice::HOMEBREW_TAP_TOKEN secret is not set; skipping push to sean-stapleton-doyle/homebrew-tap."
+            exit 0
+          fi
+          version="${GITHUB_REF_NAME#v}"
+          git clone "https://x-access-token:${TAP_TOKEN}@github.com/sean-stapleton-doyle/homebrew-tap.git" tap
+          mkdir -p tap/Formula
+          cp out/Formula/maketex.rb tap/Formula/maketex.rb
+          cd tap
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add Formula/maketex.rb
+          if git diff --cached --quiet; then
+            echo "Formula/maketex.rb already up to date."
+          else
+            git commit -m "maketex ${version}"
+            git push origin HEAD
+          fi
+
+  publish-aur:
+    needs: publish
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download release checksums
+        uses: actions/download-artifact@v4
+        with:
+          name: release-checksums
+          path: dist
+
+      - name: Render AUR PKGBUILD and .SRCINFO
+        run: |
+          version="${GITHUB_REF_NAME#v}"
+          sh packaging/aur/render-aur.sh "$version" dist/SHA256SUMS.txt out/aur
+          cat out/aur/PKGBUILD
+
+      - name: Upload rendered AUR files artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: aur-maketex-bin
+          path: |
+            out/aur/PKGBUILD
+            out/aur/.SRCINFO
+
+      - name: Push to AUR (maketex-bin)
+        env:
+          AUR_KEY: ${{ secrets.AUR_SSH_PRIVATE_KEY }}
+          AUR_GIT_NAME: ${{ secrets.AUR_GIT_NAME }}
+          AUR_GIT_EMAIL: ${{ secrets.AUR_GIT_EMAIL }}
+        run: |
+          if [ -z "$AUR_KEY" ]; then
+            echo "::notice::AUR_SSH_PRIVATE_KEY secret is not set; skipping push to AUR maketex-bin."
+            exit 0
+          fi
+          version="${GITHUB_REF_NAME#v}"
+          mkdir -p ~/.ssh
+          printf '%s\n' "$AUR_KEY" > ~/.ssh/aur_key
+          chmod 600 ~/.ssh/aur_key
+          ssh-keyscan -t ed25519 aur.archlinux.org >> ~/.ssh/known_hosts
+          export GIT_SSH_COMMAND="ssh -i ~/.ssh/aur_key -o IdentitiesOnly=yes"
+          git clone ssh://aur@aur.archlinux.org/maketex-bin.git aur-repo
+          cp out/aur/PKGBUILD out/aur/.SRCINFO aur-repo/
+          cd aur-repo
+          git config user.name "${AUR_GIT_NAME:-Sean Stapleton Doyle}"
+          git config user.email "${AUR_GIT_EMAIL:-seanstapletondoyle@gmail.com}"
+          git add PKGBUILD .SRCINFO
+          if git diff --cached --quiet; then
+            echo "AUR maketex-bin already up to date."
+          else
+            git commit -m "Update maketex-bin to ${version}"
+            git push origin master
+          fi
