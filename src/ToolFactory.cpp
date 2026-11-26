@@ -58,13 +58,13 @@ std::unique_ptr<ITool> createTool(ToolKind kind)
         });
     case ToolKind::Pythontex:
         // pythontex writes into pythontex-files-<job>/ in its cwd (outputDir);
-        // --workingdir runs the user's Python code in the document's directory
-        // so relative open("data.csv") and local imports work even under
-        // .maketex/. Outputs stay unknown so every run triggers an engine pass.
+        // which of those files the engine reads back depends on the document,
+        // so outputs stay unknown and every pythontex run is followed by an
+        // engine pass.
         return std::make_unique<HashTriggeredTool>(HashTriggeredTool::Recipe {
             .name = "pythontex",
             .kind = InvokerKind::Pythontex,
-            .argv = { "pythontex", "--workingdir=$sourcedir", "$job" },
+            .argv = { "pythontex", "$job" },
             .triggerExtensions = { ".pytxcode" },
         });
     }

@@ -122,7 +122,7 @@ TEST(HashTriggeredToolPlaceholders, expandsJobOutdirAndSourcedir)
         }));
 }
 
-TEST(PythontexRecipe, passesSourceWorkingDir)
+TEST(PythontexRecipe, invokesPythontexWithJobName)
 {
     auto tool = createTool(ToolKind::Pythontex);
     ToolInvocation inv {
@@ -132,5 +132,5 @@ TEST(PythontexRecipe, passesSourceWorkingDir)
         .sourceDir = "/proj",
     };
     EXPECT_EQ(tool->buildArgs(inv),
-        (std::vector<std::string> { "pythontex", "--workingdir=/proj", "main" }));
+        (std::vector<std::string> { "pythontex", "main" }));
 }
