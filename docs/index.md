@@ -27,6 +27,7 @@ skips several); CI installs a full TeX Live so all of them run.
 
 | Document | Status |
 |---|---|
+| [Compile API & Sandboxing Design](api_and_sandboxing_design.md) | Proposed (2026-11-26) |
 | [Test Gap Plan](test_plan.md) | Proposed (2026-10-09) |
 | [Diagnostics Plan](diagnostics_plan.md) | Implemented (2026-06-08) |
 | [Process Execution Plan](process_execution_plan.md) | Superseded — see architecture.md for divergences |
