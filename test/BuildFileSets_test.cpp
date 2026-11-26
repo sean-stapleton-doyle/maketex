@@ -75,3 +75,48 @@ TEST_F(BuildFileSetsTest, honorsOutputDir)
     EXPECT_TRUE(contains(sets->sources, m_dir / "main.tex"));
     EXPECT_TRUE(contains(sets->generated, outDir / "main.pdf"));
 }
+
+TEST_F(BuildFileSetsTest, includesBibtexInputsAsSources)
+{
+    fs::create_directories(m_dir / ".maketex");
+    writeFile("main.tex", "\\documentclass{article}\\begin{document}Hi\\end{document}\n");
+    writeFile("refs.bib", "@book{a, title={A}}\n");
+    writeFile("local.bst", "% local style\n");
+    writeFile(".maketex/main.aux",
+        "\\relax\n\\bibstyle{local}\n\\bibdata{refs}\n\\citation{a}\n");
+    writeFile(".maketex/main.fls",
+        "PWD " + m_dir.string() + "\n"
+            + "INPUT main.tex\n"
+            + "OUTPUT .maketex/main.aux\n"
+            + "INPUT .maketex/main.aux\n"
+            + "OUTPUT .maketex/main.pdf\n");
+
+    auto sets = scanBuildFiles(makeOptions());
+    ASSERT_TRUE(sets.has_value());
+    EXPECT_TRUE(contains(sets->sources, m_dir / "main.tex"));
+    EXPECT_TRUE(contains(sets->sources, m_dir / "refs.bib"));
+    EXPECT_TRUE(contains(sets->sources, m_dir / "local.bst"));
+    EXPECT_FALSE(contains(sets->sources, m_dir / ".maketex/main.aux"));
+}
+
+TEST_F(BuildFileSetsTest, includesBiberInputsAsSources)
+{
+    fs::create_directories(m_dir / ".maketex");
+    writeFile("main.tex", "\\documentclass{article}\\begin{document}Hi\\end{document}\n");
+    writeFile("refs.bib", "@book{a, title={A}}\n");
+    writeFile(".maketex/main.bcf",
+        "<bcf:controlfile>\n"
+        "  <bcf:datasource type=\"file\" datatype=\"bibtex\">refs.bib</bcf:datasource>\n"
+        "</bcf:controlfile>\n");
+    writeFile(".maketex/main.fls",
+        "PWD " + m_dir.string() + "\n"
+            + "INPUT main.tex\n"
+            + "OUTPUT .maketex/main.bcf\n"
+            + "OUTPUT .maketex/main.pdf\n");
+
+    auto sets = scanBuildFiles(makeOptions());
+    ASSERT_TRUE(sets.has_value());
+    EXPECT_TRUE(contains(sets->sources, m_dir / "refs.bib"));
+    // The .bcf trigger is generated and must not be watched as a source.
+    EXPECT_FALSE(contains(sets->sources, m_dir / ".maketex/main.bcf"));
+}

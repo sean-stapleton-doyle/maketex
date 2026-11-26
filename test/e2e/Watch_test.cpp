@@ -133,3 +133,30 @@ TEST_F(WatchTest, stoppingWatchStopsTheRunningEngine)
     EXPECT_TRUE(eventually([&] { return !engineAlive(); }, 10s))
         << "pdflatex kept running after maketex was stopped";
 }
+
+TEST_F(WatchTest, editingBibFileRebuilds)
+{
+    if (!maketex::integration::hasProgram("bibtex"))
+        GTEST_SKIP() << "not installed: bibtex";
+    auto dir = project("watchbib");
+    write(dir / "main.tex",
+        "\\documentclass{article}\n\\begin{document}\nSee \\cite{k}.\n"
+        "\\bibliographystyle{plain}\n\\bibliography{refs}\n\\end{document}\n");
+    write(dir / "refs.bib",
+        "@article{k, author={Knuth}, title={First Title}, journal={J}, year={1984}}\n");
+
+    auto watch = startWatch(dir);
+    ASSERT_TRUE(eventually([&] { return fs::exists(dir / "main.pdf"); }))
+        << "initial bibtex build never published";
+    auto firstBuild = mtime(dir / "main.pdf");
+
+    std::this_thread::sleep_for(300ms);
+    write(dir / "refs.bib",
+        "@article{k, author={Knuth}, title={Updated Title}, journal={J}, year={1984}}\n");
+
+    EXPECT_TRUE(eventually([&] { return mtime(dir / "main.pdf") != firstBuild; }))
+        << "editing refs.bib did not trigger a rebuild";
+    watch->kill();
+    auto output = watch->wait();
+    EXPECT_TRUE(contains(output.stdoutOutput, "changed: refs.bib")) << output.stdoutOutput;
+}

@@ -19,8 +19,9 @@ order:
 1. The file you pass (`maketex thesis` works too; `.tex` is optional).
 2. `main` in [`maketex.toml`](configuration.md).
 3. The `.tex` file in the current directory that starts with
-   `\documentclass`. If there are several, `main.tex` or the one named after
-   the directory wins; otherwise maketex lists them and asks you to choose.
+   `\documentclass` (excluding `subfiles` chapter files). If there are
+   several, `main.tex` or the one named after the directory wins; otherwise
+   maketex lists them and asks you to choose.
 
 If the chosen file has a `% !TEX root = ../thesis.tex` comment (as editors
 write in chapter files), maketex builds that root document instead.
@@ -66,25 +67,28 @@ Unless you set one, maketex picks the engine from the document:
 
 1. A `% !TeX program = xelatex` comment in the first lines.
 2. The packages the preamble loads: Lua-only packages (`luacode`,
-   `luatexbase`, …) or `\directlua` select `lualatex`; XeTeX-only packages
-   (`xeCJK`, `mathspec`, …) select `xelatex`; `fontspec`, `unicode-math`, and
-   `polyglossia` select `lualatex`.
+   `luatexbase`, …), `\directlua`, or TikZ's `graphdrawing` library select
+   `lualatex`; XeTeX-only packages (`xeCJK`, `mathspec`, …) select `xelatex`;
+   `fontspec`, `unicode-math`, and `polyglossia` select `lualatex`.
 3. Otherwise, `pdflatex`.
 
 If a package hidden in a custom class needs a Unicode engine, pdflatex fails
 with a message saying so, and maketex rebuilds once with the engine that the
-message names. The report says which engine ran and why:
+message names — remembering that choice in `.maketex.db` so subsequent runs
+stay incremental. The report says which engine ran and why:
 `lualatex (loads fontspec)`.
 
 ### Auxiliary tools
 
 Auxiliary tools run automatically between engine passes when their inputs
-change — the default roster is biber, makeindex, makeglossaries, pythontex,
-and bibtex, in that order. A tool runs only when the latest pass used it
-(for example, wrote a `.bcf`) and its inputs differ from its last run: a
-prose edit reruns no tools, and editing only a `.bib` comment reruns bibtex
-but no engine pass. Trim or reorder the roster with
-`--tools biber,makeindex` or the `tools` config key.
+change — the default roster is `biber`, `makeindex`, `nomencl`,
+`makeglossaries`, `bib2gls`, `pythontex`, and `bibtex`, in that order. A tool
+runs only when the latest pass used it (for example, wrote a `.bcf`, `.nlo`, or
+custom glossary file declared via `\@newglossary`) and its inputs differ from
+its last run: a prose edit reruns no tools, and editing only a `.bib` comment
+reruns bibtex but no engine pass. Trim or reorder the roster with
+`--tools biber,makeindex` or the `tools` config key, or add custom tools with
+`[[tool]]` in [`maketex.toml`](configuration.md).
 
 ### Missing packages and programs
 
@@ -131,6 +135,7 @@ arbitrary commands; the error tells you to add the flag.
 
 | Flag | Effect |
 |---|---|
+| `--jobname <name>` | override the TeX job name (basename of the PDF and aux files) |
 | `--engine <name>` | `pdflatex`, `xelatex`, or `lualatex`; detected from the document when unset |
 | `--engine-program <bin>` | spawn this executable instead of the engine's default binary |
 | `--engine-opt <opt>` | pass an option through to the engine verbatim (repeatable) |
@@ -140,6 +145,7 @@ arbitrary commands; the error tells you to add the flag.
 | `--shell-escape` / `--no-shell-escape` | enable `\write18` (default off) |
 | `--synctex` / `--no-synctex` | generate SyncTeX data (default on) |
 | `--halt-on-error` / `--no-halt-on-error` | stop at the first TeX error (default on) |
+| `--warnings-as-errors` / `--no-warnings-as-errors` | treat any LaTeX or tool warning as a build failure (default off) |
 | `--max-passes <n>` | give up if not converged after n passes (default 8) |
 | `--timeout <seconds>` | stop any engine or tool run that takes longer (default: no limit) |
 | `--install-missing` / `--no-install-missing` | install missing packages and tools with `tlmgr`, then rebuild (default on; explicit `--install-missing` skips the sudo confirmation) |

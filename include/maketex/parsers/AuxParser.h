@@ -10,8 +10,15 @@
 
 namespace maketex {
 
-// The bibliography-relevant content of a .aux file and every child .aux it
-// pulls in via \@input (one per \include'd chapter), in document order.
+// A glossary registered in the .aux via \@newglossary{name}{log}{out}{in}.
+struct GlossarySpec {
+    std::string triggerExt; // e.g. "glo", "acn", "syg" (written by LaTeX)
+    std::string outputExt; // e.g. "gls", "acr", "syi" (written by makeglossaries)
+};
+
+// The bibliography- and glossary-relevant content of a .aux file and every
+// child .aux it pulls in via \@input (one per \include'd chapter), in document
+// order.
 struct AuxRecord {
     // Bare database names from "\bibdata{}" lines — usually no .bib
     // extension. The caller locates the actual files.
@@ -23,6 +30,15 @@ struct AuxRecord {
     // when bibtex's output could — unlike the whole file, which LaTeX
     // rewrites with page numbers and labels on every pass.
     std::string bibtexSignature;
+    // Glossaries declared via \@newglossary (including custom types like
+    // \newglossary[slg]{symbols}{syi}{syg}{List of Symbols}).
+    std::vector<GlossarySpec> glossaries;
+    // bib2gls resources from \glsxtr@resource{options}{basename}:
+    // .bib files named by src=..., expected output basenames (<base>.glstex),
+    // and the newline-joined \glsxtr@resource / \glsxtr@record signature.
+    std::vector<std::string> glsBibFiles;
+    std::vector<std::string> glsOutputs;
+    std::string bib2glsSignature;
     // The .aux tree holds something no rerun check covers: anything beyond
     // \relax, labels and table-of-contents entries (LaTeX warns when those
     // change), bibliography records (the tools key on them), and the

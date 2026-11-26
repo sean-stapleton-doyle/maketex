@@ -14,12 +14,32 @@ HashTriggeredTool::HashTriggeredTool(Recipe recipe)
 {
 }
 
+namespace {
+
+    void replaceAll(std::string& text, std::string_view from, std::string_view to)
+    {
+        if (from.empty())
+            return;
+        for (size_t pos = text.find(from); pos != std::string::npos;
+            pos = text.find(from, pos + to.size())) {
+            text.replace(pos, from.size(), to);
+        }
+    }
+
+} // namespace
+
 std::vector<std::string> HashTriggeredTool::buildArgs(const ToolInvocation& inv) const
 {
+    const std::string outDir = inv.outputDir.string();
+    const std::string sourceDir = inv.sourceDir.empty()
+        ? inv.workingDir.string()
+        : inv.sourceDir.string();
     auto argv = m_recipe.argv;
-    for (auto& a : argv)
-        if (a == "$job")
-            a = inv.jobName;
+    for (auto& a : argv) {
+        replaceAll(a, "$job", inv.jobName);
+        replaceAll(a, "$outdir", outDir);
+        replaceAll(a, "$sourcedir", sourceDir);
+    }
     return argv;
 }
 

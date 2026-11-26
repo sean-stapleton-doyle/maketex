@@ -19,7 +19,8 @@ namespace maketex {
 // trailing ':' appends the system defaults (latexmk does the same with
 // -outdir).
 std::vector<std::pair<std::string, std::string>> toolSearchEnv(
-    const std::filesystem::path& texDir);
+    const std::filesystem::path& texDir,
+    const std::vector<std::pair<std::string, std::string>>& extraEnv = { });
 
 // Finds the file a tool will read for `name` (as written in the document,
 // e.g. "refs" or "refs.bib"), adding `extension` when name has none. Looks

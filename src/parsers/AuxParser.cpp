@@ -47,6 +47,9 @@ namespace {
             "\\fi",
             "\\else",
             "\\gdef\\minted@oldcachelist{", // minted: cache files to clean up
+            "\\@newglossary{", // glossaries: tracked by MakeglossariesTool
+            "\\@istfilename{",
+            "\\glsxtr@", // glossaries-extra / bib2gls: tracked by Bib2glsTool
         };
         for (auto prefix : kChecked)
             if (line.starts_with(prefix))
@@ -57,6 +60,70 @@ namespace {
     // every document writes it, and treating it as unchecked would cost
     // every cold build a second pass; documents that print "page X of Y"
     // use lastpage or zref, whose \newlabel entries are checked.
+
+    // Extracts up to `count` sequential `{...}` brace groups starting at pos.
+    std::vector<std::string_view> extractBraceGroups(std::string_view text,
+        size_t pos, size_t count)
+    {
+        std::vector<std::string_view> groups;
+        while (groups.size() < count && pos < text.size()) {
+            if (text[pos] != '{')
+                break;
+            int depth = 1;
+            size_t start = ++pos;
+            while (pos < text.size() && depth > 0) {
+                if (text[pos] == '{')
+                    ++depth;
+                else if (text[pos] == '}')
+                    --depth;
+                ++pos;
+            }
+            if (depth != 0)
+                break;
+            groups.push_back(text.substr(start, pos - start - 1));
+        }
+        return groups;
+    }
+
+    // Extracts bib file names from `src=entries` or `src={a,b}` inside
+    // \glsxtr@resource{options}{basename}.
+    void extractGlsSrcFiles(std::string_view options, std::vector<std::string>& out)
+    {
+        size_t pos = 0;
+        while ((pos = options.find("src=", pos)) != std::string_view::npos) {
+            if (pos > 0 && std::isalnum(static_cast<unsigned char>(options[pos - 1]))) {
+                pos += 4;
+                continue;
+            }
+            pos += 4;
+            std::string_view val;
+            if (pos < options.size() && options[pos] == '{') {
+                auto end = options.find('}', pos + 1);
+                if (end == std::string_view::npos)
+                    break;
+                val = options.substr(pos + 1, end - pos - 1);
+                pos = end + 1;
+            } else {
+                auto end = options.find(',', pos);
+                val = options.substr(pos, end == std::string_view::npos ? std::string_view::npos : end - pos);
+                pos = end == std::string_view::npos ? options.size() : end + 1;
+            }
+            size_t s = 0;
+            while (s < val.size()) {
+                auto comma = val.find(',', s);
+                auto item = val.substr(s, comma == std::string_view::npos ? std::string_view::npos : comma - s);
+                while (!item.empty() && (item.front() == ' ' || item.front() == '\t'))
+                    item.remove_prefix(1);
+                while (!item.empty() && (item.back() == ' ' || item.back() == '\t'))
+                    item.remove_suffix(1);
+                if (!item.empty())
+                    out.emplace_back(item);
+                if (comma == std::string_view::npos)
+                    break;
+                s = comma + 1;
+            }
+        }
+    }
 
 } // namespace
 
@@ -104,6 +171,27 @@ std::expected<AuxRecord, std::error_code> AuxParser::parse(const fs::path& path)
             lastLineChecked = isCheckedContent(line);
         if (!lastLineChecked)
             rec.hasUncheckedContent = true;
+        if (line.starts_with("\\@newglossary{")) {
+            auto groups = extractBraceGroups(line, 13, 4);
+            if (groups.size() == 4 && !groups[2].empty() && !groups[3].empty()) {
+                rec.glossaries.push_back(GlossarySpec {
+                    .triggerExt = std::string(groups[3]),
+                    .outputExt = std::string(groups[2]),
+                });
+            }
+        } else if (line.starts_with("\\glsxtr@resource{")) {
+            auto groups = extractBraceGroups(line, 16, 2);
+            if (groups.size() == 2 && !groups[1].empty()) {
+                extractGlsSrcFiles(groups[0], rec.glsBibFiles);
+                rec.glsOutputs.emplace_back(groups[1]);
+            }
+            rec.bib2glsSignature += line;
+            rec.bib2glsSignature += '\n';
+        } else if (line.starts_with("\\glsxtr@record") || line.starts_with("\\glsxtr@fields")) {
+            rec.bib2glsSignature += line;
+            rec.bib2glsSignature += '\n';
+        }
+
         if (auto b = extractBraces(line, "\\bibdata{"); !b.empty()) {
             splitComma(b, [&](std::string_view name) {
                 rec.bibDataFiles.emplace_back(name);

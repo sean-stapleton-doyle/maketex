@@ -1,0 +1,145 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  verify-tag:
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Check tag matches CMakeLists.txt version
+        run: |
+          tag_version="${GITHUB_REF_NAME#v}"
+          cmake_version="$(sed -n 's/^project(maketex VERSION \([^ ]*\).*/\1/p' CMakeLists.txt)"
+          echo "Tag version:   $tag_version"
+          echo "CMake version: $cmake_version"
+          if [ "$tag_version" != "$cmake_version" ]; then
+            echo "::error::Tag v$tag_version does not match CMakeLists.txt VERSION $cmake_version"
+            exit 1
+          fi
+
+  build:
+    needs: verify-tag
+    if: always() && (needs.verify-tag.result == 'success' || needs.verify-tag.result == 'skipped')
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: macos-arm64
+            os: macos-15
+            compiler: ""
+          - target: macos-x86_64
+            os: macos-15-intel
+            compiler: ""
+          - target: linux-x86_64
+            os: ubuntu-24.04
+            compiler: g++-14
+          - target: linux-arm64
+            os: ubuntu-24.04-arm
+            compiler: g++-14
+
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install toolchain (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends g++-14 ninja-build pipx
+          pipx install cmake
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+
+      - name: Install toolchain (macOS)
+        if: runner.os == 'macOS'
+        run: brew install ninja
+
+      - name: Cache CPM sources
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/CPM
+          key: cpm-release-${{ runner.os }}-${{ hashFiles('CMakeLists.txt', 'cli/CMakeLists.txt') }}
+
+      - name: Configure
+        env:
+          CPM_SOURCE_CACHE: ~/.cache/CPM
+        run: |
+          extra_flags=()
+          if [ -n "${{ matrix.compiler }}" ]; then
+            extra_flags+=("-DCMAKE_CXX_COMPILER=${{ matrix.compiler }}")
+            extra_flags+=("-DCMAKE_EXE_LINKER_FLAGS=-static-libstdc++ -static-libgcc")
+          fi
+          cmake -S . -B build -G Ninja \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DMAKETEX_BUILD_CLI=ON \
+            -DMAKETEX_BUILD_TESTS=ON \
+            "${extra_flags[@]}"
+
+      - name: Build
+        run: cmake --build build --parallel
+
+      - name: Run unit tests
+        run: ctest --test-dir build --label-exclude "integration|e2e" --output-on-failure -j 4
+
+      - name: Stage and package archive
+        run: |
+          version="${GITHUB_REF_NAME#v}"
+          if [[ "$GITHUB_REF" != refs/tags/v* ]]; then
+            version="$(sed -n 's/^project(maketex VERSION \([^ ]*\).*/\1/p' CMakeLists.txt)-dev"
+          fi
+          pkg="maketex-${version}-${{ matrix.target }}"
+          cmake --install build --component maketex --prefix "stage/${pkg}" --strip
+          cp README.md "stage/${pkg}/"
+          if [ -f LICENSE ]; then
+            cp LICENSE "stage/${pkg}/"
+          fi
+
+          # Smoke-test the installed binary.
+          "stage/${pkg}/bin/maketex" --version
+          "stage/${pkg}/bin/maketex" --help >/dev/null
+
+          mkdir -p dist
+          tar -C stage -czf "dist/${pkg}.tar.gz" "${pkg}"
+
+      - name: Upload archive artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: maketex-${{ matrix.target }}
+          path: dist/*.tar.gz
+          if-no-files-found: error
+
+  publish:
+    needs: build
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    steps:
+      - name: Download all release archives
+        uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+
+      - name: Generate SHA256 checksums
+        working-directory: dist
+        run: |
+          sha256sum *.tar.gz > SHA256SUMS.txt
+          cat SHA256SUMS.txt
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          generate_release_notes: true
+          files: |
+            dist/*.tar.gz
+            dist/SHA256SUMS.txt

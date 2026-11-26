@@ -32,10 +32,12 @@ namespace {
     constexpr ToolInfo kTools[] = {
         { "bibtex", "--version", "\\bibliography documents" },
         { "biber", "--version", "biblatex documents" },
-        { "makeindex", "", "indexes" },
+        { "makeindex", "", "indexes and nomenclature" },
         { "makeglossaries", "--version", "glossaries" },
+        { "bib2gls", "--version", "glossaries-extra (bib2gls)" },
         { "pythontex", "--version", "PythonTeX" },
         { "pygmentize", "-V", "minted code listings" },
+        { "inkscape", "--version", "svg figures" },
     };
 
     std::string firstLine(std::string text)
@@ -61,15 +63,30 @@ namespace {
     }
 
     // Which of `files` kpsewhich finds — one process for the whole list.
-    std::set<std::string> findTexFiles(const std::vector<std::string>& files)
+    // Runs from `workingDir` (the document's directory) with any configured
+    // texinputs prepended to TEXINPUTS so local/shared .cls/.sty files are
+    // found just as the engine will find them.
+    std::set<std::string> findTexFiles(const std::vector<std::string>& files,
+        const fs::path& workingDir, const std::vector<std::string>& texInputs)
     {
         std::set<std::string> found;
         if (files.empty())
             return found;
         std::vector<std::string> args { "kpsewhich" };
         args.insert(args.end(), files.begin(), files.end());
+        std::vector<std::pair<std::string, std::string>> env;
+        if (!texInputs.empty()) {
+            std::string value;
+            for (const auto& d : texInputs) {
+                value += d;
+                value += ':';
+            }
+            if (const char* existing = std::getenv("TEXINPUTS"); existing && *existing)
+                value += existing;
+            env.emplace_back("TEXINPUTS", std::move(value));
+        }
         try {
-            auto r = Process(args).wait({ .timeout = 30s });
+            auto r = Process(args, workingDir, env).wait({ .timeout = 30s });
             std::string_view rest = r.stdoutOutput;
             while (!rest.empty()) {
                 auto nl = rest.find('\n');
@@ -148,16 +165,21 @@ namespace {
     // What a document lacks: TeX files kpsewhich can't find and programs
     // not on PATH, as missing-file/missing-tool diagnostics (the shape the
     // hint and install code consume).
-    std::vector<Diagnostic> documentGaps(const DocumentRequirements& req)
+    std::vector<Diagnostic> documentGaps(const DocumentRequirements& req,
+        const fs::path& docDir, const EngineChoice& engine,
+        const std::vector<std::string>& texInputs)
     {
         std::vector<std::string> files;
         if (!req.documentClass.empty())
             files.push_back(req.documentClass + ".cls");
         for (const auto& p : req.packages)
             files.push_back(p + ".sty");
-        auto found = findTexFiles(files);
+        auto found = findTexFiles(files, docDir, texInputs);
 
         std::vector<Diagnostic> gaps;
+        std::string engineProg(engineKindName(engine.kind));
+        if (!findProgram(engineProg))
+            gaps.push_back({ .message = "engine", .category = "missing-tool", .missingFile = engineProg });
         for (const auto& f : files)
             if (!found.contains(f))
                 gaps.push_back({ .message = f, .category = "missing-file", .missingFile = f });
@@ -205,6 +227,22 @@ int runDoctorCommand(const EffectiveOptions& options)
     if (!options.build.texFile.empty())
         req = analyzeRequirements(options.build.texFile);
     auto engine = req ? chooseEngine(options.build) : EngineChoice { };
+    const fs::path docDir = options.build.texFile.empty()
+        ? fs::current_path()
+        : options.build.texFile.parent_path();
+
+    // doctor diagnoses by default; when --install-missing is given explicitly,
+    // install missing engines, tools, and packages before reporting so every
+    // section reflects the final state of the system.
+    if (req && options.extras.installMissingRequested) {
+        auto gaps = documentGaps(*req, docDir, engine, options.build.searchPaths.texInputs);
+        if (!gaps.empty()) {
+            auto plan = planInstall(gaps, lookup);
+            auto capability = installCapability(distro, interactive);
+            if (!plan.packages.empty() && capability.access != InstallCapability::Access::Unavailable)
+                installPackages(plan.packages, capability.access, std::cerr);
+        }
+    }
 
     // ── Engines ──────────────────────────────────────────────────────────
     report.section("Engines");
@@ -252,27 +290,24 @@ int runDoctorCommand(const EffectiveOptions& options)
                     : engine.reason.empty() ? " (default)"
                                             : " (" + engine.reason + ")"));
 
-        auto gaps = documentGaps(*req);
-        // doctor diagnoses; it installs only when asked explicitly.
-        if (options.extras.installMissingRequested && !gaps.empty()) {
-            auto plan = planInstall(gaps, lookup);
-            auto capability = installCapability(distro, interactive);
-            if (!plan.packages.empty() && capability.access != InstallCapability::Access::Unavailable
-                && installPackages(plan.packages, capability.access, std::cerr))
-                gaps = documentGaps(*req); // check again after installing
-        }
+        auto gaps = documentGaps(*req, docDir, engine, options.build.searchPaths.texInputs);
 
-        std::size_t texFiles = req->packages.size() + (req->documentClass.empty() ? 0 : 1);
+        const std::size_t pkgCount = req->packages.size();
+        const bool hasClass = !req->documentClass.empty();
         auto missingTexFiles = std::ranges::count(gaps, std::string("missing-file"), &Diagnostic::category);
-        if (missingTexFiles == 0)
-            report.ok("packages", std::format("class and {} package{} found", texFiles - 1, texFiles == 2 ? "" : "s"));
+        if (missingTexFiles == 0) {
+            if (hasClass)
+                report.ok("packages", std::format("class and {} package{} found", pkgCount, pkgCount == 1 ? "" : "s"));
+            else
+                report.ok("packages", std::format("{} package{} found", pkgCount, pkgCount == 1 ? "" : "s"));
+        }
         // Programs are reported under Tools, which marks the ones this
         // document needs; here only its TeX files.
         for (const auto& gap : gaps)
             if (gap.category == "missing-file")
                 report.fail(gap.missingFile, "not installed", installHint(gap.missingFile, distro, lookup));
         if (req->needsShellEscape && !options.build.shellEscape)
-            report.warn("shell escape", "the document runs external programs (minted, svg)",
+            report.warn("shell escape", "the document runs external programs (minted, svg, tikz externalize)",
                 "build with --shell-escape, or set `shell-escape = true` in maketex.toml "
                 "(only for documents you trust)");
     } else {

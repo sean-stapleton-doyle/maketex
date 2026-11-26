@@ -110,9 +110,15 @@ public:
     // Jobs (documents) that have state here, from their fingerprints.
     std::vector<std::string> jobs() const;
 
-    // Drops a job's rule records and fingerprint — `clean --all` for one
-    // document in a shared output directory.
+    // Drops a job's rule records, fingerprint, and job-scoped metadata —
+    // `clean --all` for one document in a shared output directory.
     void forgetJob(const std::string& jobName);
+
+    // Per-job metadata (e.g. an auto-detected engine remembered across runs).
+    std::optional<std::string> getJobMeta(const std::string& jobName,
+        const std::string& key) const;
+    void setJobMeta(const std::string& jobName, const std::string& key,
+        const std::string& value);
 
 private:
     void deleteJobRules(const std::string& jobName);

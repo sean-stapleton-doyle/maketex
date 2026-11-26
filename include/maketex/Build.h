@@ -6,12 +6,14 @@
 #include "maketex/EngineArguments.h"
 #include "maketex/ToolFactory.h"
 #include "maketex/engines/EngineFactory.h"
+#include "maketex/tools/HashTriggeredTool.h"
 
 #include <chrono>
 #include <filesystem>
 #include <optional>
 #include <stop_token>
 #include <string>
+#include <utility>
 #include <vector>
 
 namespace maketex {
@@ -26,11 +28,24 @@ std::string_view version();
 // Returns an empty list (track everything) when kpsewhich is unavailable.
 std::vector<std::filesystem::path> texSystemRoots();
 
+// Extra kpathsea search directories prepended to TEXINPUTS/BIBINPUTS/etc.
+// Stored as strings so kpathsea's recursive "//" suffix is preserved verbatim.
+struct SearchPaths {
+    std::vector<std::string> texInputs;
+    std::vector<std::string> bibInputs;
+    std::vector<std::string> bstInputs;
+    std::vector<std::string> indexStyle;
+};
+
 // Everything needed to run a complete build. The eventual CLI constructs
 // this from flags and the user's config file; apps/main.cpp constructs it
 // from flags only.
 struct BuildOptions {
     std::filesystem::path texFile; // absolute path to the root .tex file
+
+    // Explicit TeX job name (basename of .aux/.log/.pdf). Unset uses a
+    // -jobname in engineArguments.extraOptions, else texFile.stem().
+    std::optional<std::string> jobName;
 
     // The engine to drive; unset means detect it from the document (see
     // chooseEngine).
@@ -41,10 +56,28 @@ struct BuildOptions {
     std::vector<ToolKind> tools = {
         ToolKind::Biber,
         ToolKind::Makeindex,
+        ToolKind::Nomencl,
         ToolKind::Makeglossaries,
+        ToolKind::Bib2gls,
         ToolKind::Pythontex,
         ToolKind::Bibtex,
     };
+
+    // User-defined auxiliary tools declared in maketex.toml ([[tool]]), run
+    // after the built-in roster.
+    std::vector<HashTriggeredTool::Recipe> customTools;
+
+    // Extra kpathsea search directories and arbitrary environment variables
+    // passed to the engine and auxiliary tools.
+    SearchPaths searchPaths;
+    std::vector<std::pair<std::string, std::string>> extraEnv;
+
+    // Extra per-extension regex line filters (extension without leading dot ->
+    // ECMAScript regex) appended to BuildDriver's built-in filters.
+    std::vector<std::pair<std::string, std::string>> contentFilters;
+
+    // Controls warning suppression and treating warnings as build failures.
+    DiagnosticPolicy diagnosticPolicy;
 
     // Where the engine writes its outputs and where .maketex.db lives.
     // Empty means "<texdir>/.maketex" (created on demand by runBuild); the

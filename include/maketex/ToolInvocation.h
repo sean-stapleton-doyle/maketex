@@ -11,6 +11,7 @@ struct ToolInvocation {
     std::filesystem::path workingDir;
     std::string jobName;
     std::filesystem::path outputDir;
+    std::filesystem::path sourceDir;
 };
 
 } // namespace maketex

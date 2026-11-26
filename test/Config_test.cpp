@@ -192,3 +192,77 @@ TEST_F(FindConfigFileTest, neverReadsTheHomeDirectory)
 
     EXPECT_FALSE(found.has_value());
 }
+
+TEST(ParseConfig, parsesCustomToolsSearchPathsEnvContentFiltersAndDiagnostics)
+{
+    auto config = parseConfig(R"(
+jobname = "paper"
+texinputs = ["styles//", "../common"]
+bibinputs = ["../bib"]
+bstinputs = ["styles"]
+indexstyle = ["styles"]
+
+[env]
+FOO = "bar"
+
+[content-filters]
+".aux" = "^\\\\myStamp\\{"
+eps = "^%%CreationDate: "
+
+[diagnostics]
+warnings-as-errors = true
+fail-on = ["undefined-citation", "undefined-reference"]
+ignore = ["overfull-hbox", "underfull-hbox"]
+
+[[tool]]
+name = "nomencl"
+command = ["makeindex", "$job.nlo", "-s", "nomencl.ist", "-o", "$job.nls"]
+triggers = ["nlo"]
+outputs = [".nls"]
+working-dir = "output"
+
+[[tool]]
+name = "custom-src"
+command = ["mytool", "$job"]
+triggers = [".raw"]
+working-dir = "source"
+)",
+        kSource);
+
+    ASSERT_TRUE(config.has_value()) << config.error();
+    EXPECT_TRUE(config->warnings.empty());
+    EXPECT_EQ(config->jobName, "paper");
+    EXPECT_EQ(config->searchPaths.texInputs,
+        (std::vector<std::string> { "/project/styles//", "/common" }));
+    EXPECT_EQ(config->searchPaths.bibInputs, (std::vector<std::string> { "/bib" }));
+    EXPECT_EQ(config->searchPaths.bstInputs, (std::vector<std::string> { "/project/styles" }));
+    EXPECT_EQ(config->searchPaths.indexStyle, (std::vector<std::string> { "/project/styles" }));
+    ASSERT_EQ(config->extraEnv.size(), 1u);
+    EXPECT_EQ(config->extraEnv[0], (std::pair<std::string, std::string> { "FOO", "bar" }));
+    EXPECT_EQ(config->contentFilters.size(), 2u);
+    EXPECT_EQ(config->warningsAsErrors, true);
+    EXPECT_EQ(config->failOn,
+        (std::vector<std::string> { "undefined-citation", "undefined-reference" }));
+    EXPECT_EQ(config->ignoreWarnings,
+        (std::vector<std::string> { "overfull-hbox", "underfull-hbox" }));
+
+    ASSERT_EQ(config->customTools.size(), 2u);
+    EXPECT_EQ(config->customTools[0].name, "nomencl");
+    EXPECT_EQ(config->customTools[0].triggerExtensions, (std::vector<std::string> { ".nlo" }));
+    EXPECT_EQ(config->customTools[0].outputExtensions, (std::vector<std::string> { ".nls" }));
+    EXPECT_EQ(config->customTools[0].workingDir, maketex::ToolWorkingDir::Output);
+    EXPECT_EQ(config->customTools[1].workingDir, maketex::ToolWorkingDir::Source);
+    EXPECT_TRUE(config->customTools[1].outputExtensions.empty());
+}
+
+TEST(ParseConfig, rejectsInvalidCustomToolRegexAndJobname)
+{
+    EXPECT_FALSE(parseConfig("jobname = \"\"\n", kSource).has_value());
+    EXPECT_FALSE(parseConfig("[content-filters]\naux = \"[unclosed\"\n", kSource).has_value());
+    EXPECT_FALSE(parseConfig("[env]\nNUM = 42\n", kSource).has_value());
+    EXPECT_FALSE(parseConfig("[[tool]]\nname = \"x\"\n", kSource).has_value());
+    EXPECT_FALSE(parseConfig(
+        "[[tool]]\nname = \"x\"\ncommand = [\"echo\"]\ntriggers = [\".in\"]\nworking-dir = \"bad\"\n",
+        kSource)
+            .has_value());
+}

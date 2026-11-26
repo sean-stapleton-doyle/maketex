@@ -74,3 +74,28 @@ TEST(PackageHints, userInputFilesGetNoHint)
     maketex::cli::addInstallHints(diags);
     EXPECT_TRUE(diags[0].hint.empty());
 }
+
+TEST(PackageHints, isInstallableCoversTexSupportFilesButNotUserSources)
+{
+    auto file = [](std::string name) {
+        return Diagnostic { .category = "missing-file", .missingFile = std::move(name) };
+    };
+    EXPECT_TRUE(maketex::cli::isInstallable(file("minted.sty")));
+    EXPECT_TRUE(maketex::cli::isInstallable(file("IEEEtran.cls")));
+    EXPECT_TRUE(maketex::cli::isInstallable(file("french.ldf")));
+    EXPECT_TRUE(maketex::cli::isInstallable(file("ieee.bbx")));
+    EXPECT_TRUE(maketex::cli::isInstallable(file("ieee.cbx")));
+    EXPECT_TRUE(maketex::cli::isInstallable(file("IEEEtran.bst")));
+    EXPECT_TRUE(maketex::cli::isInstallable(file("tikzlibraryshapes.code.tex")));
+    EXPECT_TRUE(maketex::cli::isInstallable(file("ecrm1000.tfm")));
+
+    EXPECT_FALSE(maketex::cli::isInstallable(file("chapter.tex")));
+    EXPECT_FALSE(maketex::cli::isInstallable(file("refs.bib")));
+    EXPECT_FALSE(maketex::cli::isInstallable(file("missing-figure")));
+}
+
+TEST(PackageHints, inkscapeGetsNonTexHint)
+{
+    EXPECT_NE(installHint("inkscape", TexDistribution::TexLive, kNoLookup).find("Inkscape"),
+        std::string::npos);
+}

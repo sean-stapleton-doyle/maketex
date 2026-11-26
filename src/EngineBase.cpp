@@ -15,16 +15,23 @@ RunResult<EngineInvocation> EngineBase::run(const EngineInvocation& inv,
     // file paths and messages mid-token and defeats diagnostic parsing.
     // These web2c knobs (the same ones latexmk sets) keep lines whole;
     // error_line is capped at 254 by web2c itself.
-    static const std::vector<std::pair<std::string, std::string>> kLogWidthEnv = {
+    std::vector<std::pair<std::string, std::string>> env = {
         { "max_print_line", "10000" },
         { "error_line", "254" },
         { "half_error_line", "238" },
     };
+    for (const auto& [k, v] : inv.extraEnv) {
+        auto it = std::ranges::find(env, k, &std::pair<std::string, std::string>::first);
+        if (it != env.end())
+            it->second = v;
+        else
+            env.emplace_back(k, v);
+    }
 
     // Run from the tex file's directory so that relative \input{} and \include{}
     // paths resolve correctly regardless of maketex's own working directory.
     return launchProcess(buildArgs(inv), inv.texFile.parent_path(),
-        invokerKind(), inv, kLogWidthEnv, limits);
+        invokerKind(), inv, env, limits);
 }
 
 void EngineBase::appendExtraOptions(std::vector<std::string>& args) const

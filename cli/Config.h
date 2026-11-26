@@ -1,5 +1,6 @@
 #pragma once
 
+#include "maketex/Build.h"
 #include "maketex/ToolFactory.h"
 #include "maketex/engines/EngineFactory.h"
 
@@ -8,6 +9,7 @@
 #include <optional>
 #include <string>
 #include <string_view>
+#include <utility>
 #include <vector>
 
 namespace maketex::cli {
@@ -17,10 +19,12 @@ namespace maketex::cli {
 // against the config file's directory.
 struct Config {
     std::optional<std::filesystem::path> main;
+    std::optional<std::string> jobName;
     std::optional<EngineKind> engine;
     std::optional<std::string> engineProgram;
     std::vector<std::string> engineOptions;
     std::optional<std::vector<ToolKind>> tools;
+    std::vector<HashTriggeredTool::Recipe> customTools;
     std::optional<std::filesystem::path> outputDir;
     std::optional<bool> shellEscape;
     std::optional<bool> synctex;
@@ -28,6 +32,14 @@ struct Config {
     std::optional<int> maxPasses;
     std::optional<int> timeoutSeconds;
     std::optional<bool> installMissing;
+
+    SearchPaths searchPaths;
+    std::vector<std::pair<std::string, std::string>> extraEnv;
+    std::vector<std::pair<std::string, std::string>> contentFilters;
+
+    std::optional<bool> warningsAsErrors;
+    std::vector<std::string> failOn;
+    std::vector<std::string> ignoreWarnings;
 
     std::optional<int> watchIntervalMs;
     std::vector<std::filesystem::path> watchExtraPaths;

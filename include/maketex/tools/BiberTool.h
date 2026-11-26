@@ -12,8 +12,10 @@ class BiberTool final : public ITool {
 public:
     std::string_view name() const override { return "biber"; }
     InvokerKind invokerKind() const override { return InvokerKind::Biber; }
+    ToolWorkingDir workingDirPreference() const override { return ToolWorkingDir::Source; }
 
-    // argv: { "biber", "<jobName>" }, run from the output directory.
+    // Runs from sourceDir with --input-directory / --output-directory when
+    // separated so parent-relative .bib paths (../refs.bib) resolve.
     std::vector<std::string> buildArgs(const ToolInvocation& inv) const override;
 
     bool applies(const ToolContext& ctx) const override;

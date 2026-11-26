@@ -9,15 +9,28 @@ namespace maketex {
 
 namespace fs = std::filesystem;
 
+namespace {
+
+    // Canonicalizes paths without throwing when a directory along the path
+    // (e.g. an unreadable system TEXMFVAR) denies stat/read permissions.
+    fs::path safeWeaklyCanonical(const fs::path& p)
+    {
+        std::error_code ec;
+        auto canon = fs::weakly_canonical(p, ec);
+        return ec ? p.lexically_normal() : canon;
+    }
+
+} // namespace
+
 FlsParser& FlsParser::addIgnorePrefix(const fs::path& prefix)
 {
-    m_ignorePrefixes.push_back(fs::weakly_canonical(prefix));
+    m_ignorePrefixes.push_back(safeWeaklyCanonical(prefix));
     return *this;
 }
 
 FlsParser& FlsParser::overridePwd(const fs::path& pwd)
 {
-    m_pwdOverride = fs::weakly_canonical(pwd);
+    m_pwdOverride = safeWeaklyCanonical(pwd);
     return *this;
 }
 
@@ -28,7 +41,7 @@ std::expected<FlsRecord, std::error_code> FlsParser::parse(const fs::path& path)
 
     auto r = detail::forEachLine(path, [&](std::string_view line) {
         if (line.starts_with("PWD ")) {
-            rec.pwd = fs::weakly_canonical(fs::path(line.substr(4)));
+            rec.pwd = safeWeaklyCanonical(fs::path(line.substr(4)));
         } else if (line.starts_with("INPUT ")) {
             auto p = resolvePath(rec.pwd, line.substr(6));
             if (!isIgnored(p) && seenIn.insert(p.string()).second)
@@ -54,14 +67,14 @@ fs::path FlsParser::resolvePath(const fs::path& recordedPwd,
             = m_pwdOverride.empty() ? recordedPwd : m_pwdOverride;
         if (!base.empty())
             p = base / p;
-        return fs::weakly_canonical(p);
+        return safeWeaklyCanonical(p);
     }
 
-    p = fs::weakly_canonical(p);
+    p = safeWeaklyCanonical(p);
     if (!m_pwdOverride.empty() && !recordedPwd.empty()) {
         auto rel = p.lexically_relative(recordedPwd);
         if (!rel.empty() && rel != "." && *rel.begin() != "..")
-            return fs::weakly_canonical(m_pwdOverride / rel);
+            return safeWeaklyCanonical(m_pwdOverride / rel);
     }
     return p;
 }

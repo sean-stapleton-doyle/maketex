@@ -9,6 +9,8 @@ enum class InvokerKind { PdfLaTeX,
     Biber,
     Makeindex,
     Makeglossaries,
-    Pythontex };
+    Bib2gls,
+    Pythontex,
+    Custom };
 
 } // namespace maketex

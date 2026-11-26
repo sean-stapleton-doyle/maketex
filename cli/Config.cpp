@@ -6,6 +6,7 @@
 #include <format>
 #include <fstream>
 #include <limits>
+#include <regex>
 #include <sstream>
 #include <utility>
 
@@ -134,6 +135,31 @@ namespace {
         return p.is_absolute() ? p : base / p;
     }
 
+    // Resolves a kpathsea search-path entry against baseDir while preserving
+    // kpathsea's recursive "//" suffix (std::filesystem would collapse it).
+    std::string resolveSearchEntry(const fs::path& base, std::string_view entry)
+    {
+        bool recursive = entry.ends_with("//");
+        std::string_view stripped = recursive ? entry.substr(0, entry.size() - 2) : entry;
+        if (stripped.empty())
+            return recursive ? (base.string() + "//") : base.string();
+        fs::path resolved = resolveAgainst(base, fs::path(stripped)).lexically_normal();
+        std::string out = resolved.string();
+        if (recursive) {
+            while (out.size() > 1 && out.back() == '/')
+                out.pop_back();
+            out += "//";
+        }
+        return out;
+    }
+
+    std::string withLeadingDot(std::string ext)
+    {
+        if (!ext.empty() && !ext.starts_with('.'))
+            ext.insert(ext.begin(), '.');
+        return ext;
+    }
+
 } // namespace
 
 std::expected<Config, std::string> parseConfig(std::string_view toml,
@@ -154,12 +180,21 @@ std::expected<Config, std::string> parseConfig(std::string_view toml,
     Errors errors(sourceFile);
 
     warnUnknownKeys(table, "",
-        { "main", "engine", "output-dir", "tools", "shell-escape", "synctex",
-            "halt-on-error", "max-passes", "timeout", "install-missing", "engine-args", "watch", "clean" },
+        { "main", "jobname", "engine", "output-dir", "tools", "tool", "shell-escape",
+            "synctex", "halt-on-error", "max-passes", "timeout", "install-missing",
+            "texinputs", "bibinputs", "bstinputs", "indexstyle",
+            "engine-args", "env", "content-filters", "diagnostics", "watch", "clean" },
         sourceFile, config.warnings);
 
     if (auto main = getScalar<std::string>(table, "main", "string", errors))
         config.main = resolveAgainst(baseDir, *main);
+
+    if (auto job = getScalar<std::string>(table, "jobname", "string", errors)) {
+        if (job->empty())
+            errors.add(*table.get("jobname"), "`jobname` must not be empty");
+        else
+            config.jobName = std::move(*job);
+    }
 
     if (auto engine = getScalar<std::string>(table, "engine", "string", errors)) {
         config.engine = parseEngineKind(*engine);
@@ -244,14 +279,131 @@ std::expected<Config, std::string> parseConfig(std::string_view toml,
             warnUnknownKeys(*clean, "clean", { "extra-extensions" }, sourceFile,
                 config.warnings);
             if (auto exts = getStringArray(*clean, "extra-extensions", errors)) {
-                for (auto& ext : *exts) {
-                    if (!ext.starts_with('.'))
-                        ext.insert(ext.begin(), '.');
-                    config.cleanExtraExtensions.push_back(std::move(ext));
-                }
+                for (auto& ext : *exts)
+                    config.cleanExtraExtensions.push_back(withLeadingDot(std::move(ext)));
             }
         } else {
             errors.add(*node, "`clean` must be a table");
+        }
+    }
+
+    auto readSearchList = [&](std::string_view key, std::vector<std::string>& dst) {
+        if (auto paths = getStringArray(table, key, errors)) {
+            for (const auto& entry : *paths)
+                dst.push_back(resolveSearchEntry(baseDir, entry));
+        }
+    };
+    readSearchList("texinputs", config.searchPaths.texInputs);
+    readSearchList("bibinputs", config.searchPaths.bibInputs);
+    readSearchList("bstinputs", config.searchPaths.bstInputs);
+    readSearchList("indexstyle", config.searchPaths.indexStyle);
+
+    if (const toml::node* node = table.get("env")) {
+        if (const toml::table* envTable = node->as_table()) {
+            for (const auto& [k, v] : *envTable) {
+                if (auto s = v.value<std::string>())
+                    config.extraEnv.emplace_back(std::string(k.str()), std::move(*s));
+                else
+                    errors.add(v, std::format("`env.{}` must be a string", k.str()));
+            }
+        } else {
+            errors.add(*node, "`env` must be a table");
+        }
+    }
+
+    if (const toml::node* node = table.get("content-filters")) {
+        if (const toml::table* filters = node->as_table()) {
+            for (const auto& [k, v] : *filters) {
+                auto s = v.value<std::string>();
+                if (!s) {
+                    errors.add(v, std::format("`content-filters.{}` must be a string", k.str()));
+                    continue;
+                }
+                try {
+                    (void)std::regex(*s);
+                } catch (const std::regex_error& e) {
+                    errors.add(v, std::format("`content-filters.{}` is not a valid regex: {}", k.str(), e.what()));
+                    continue;
+                }
+                std::string ext(k.str());
+                if (ext.starts_with('.'))
+                    ext.erase(ext.begin());
+                config.contentFilters.emplace_back(std::move(ext), std::move(*s));
+            }
+        } else {
+            errors.add(*node, "`content-filters` must be a table");
+        }
+    }
+
+    if (const toml::node* node = table.get("diagnostics")) {
+        if (const toml::table* diag = node->as_table()) {
+            warnUnknownKeys(*diag, "diagnostics",
+                { "warnings-as-errors", "fail-on", "ignore" }, sourceFile, config.warnings);
+            config.warningsAsErrors = getScalar<bool>(*diag, "warnings-as-errors",
+                "boolean", errors);
+            if (auto list = getStringArray(*diag, "fail-on", errors))
+                config.failOn = std::move(*list);
+            if (auto list = getStringArray(*diag, "ignore", errors))
+                config.ignoreWarnings = std::move(*list);
+        } else {
+            errors.add(*node, "`diagnostics` must be a table");
+        }
+    }
+
+    if (const toml::node* node = table.get("tool")) {
+        if (const toml::array* arr = node->as_array()) {
+            for (const toml::node& elem : *arr) {
+                const toml::table* t = elem.as_table();
+                if (!t) {
+                    errors.add(elem, "`tool` entries must be tables");
+                    continue;
+                }
+                warnUnknownKeys(*t, "tool",
+                    { "name", "command", "triggers", "outputs", "working-dir" },
+                    sourceFile, config.warnings);
+
+                auto name = getScalar<std::string>(*t, "name", "string", errors);
+                auto cmd = getStringArray(*t, "command", errors);
+                auto triggers = getStringArray(*t, "triggers", errors);
+                auto outputs = getStringArray(*t, "outputs", errors);
+                auto wd = getScalar<std::string>(*t, "working-dir", "string", errors);
+
+                if (!name || name->empty())
+                    errors.add(elem, "`tool.name` is required and must be a non-empty string");
+                if (!cmd || cmd->empty())
+                    errors.add(elem, "`tool.command` is required and must be a non-empty array of strings");
+                if (!triggers || triggers->empty())
+                    errors.add(elem, "`tool.triggers` is required and must be a non-empty array of extensions");
+
+                ToolWorkingDir workingDir = ToolWorkingDir::Output;
+                if (wd) {
+                    if (*wd == "output")
+                        workingDir = ToolWorkingDir::Output;
+                    else if (*wd == "source")
+                        workingDir = ToolWorkingDir::Source;
+                    else
+                        errors.add(*t->get("working-dir"),
+                            std::format("unknown `tool.working-dir` `{}` (expected output or source)", *wd));
+                }
+
+                if (name && !name->empty() && cmd && !cmd->empty() && triggers && !triggers->empty()) {
+                    HashTriggeredTool::Recipe recipe {
+                        .name = std::move(*name),
+                        .kind = InvokerKind::Custom,
+                        .argv = std::move(*cmd),
+                        .workingDir = workingDir,
+                    };
+                    for (auto& ext : *triggers)
+                        recipe.triggerExtensions.push_back(withLeadingDot(std::move(ext)));
+                    if (outputs) {
+                        for (auto& ext : *outputs)
+                            recipe.outputExtensions.push_back(withLeadingDot(std::move(ext)));
+                    }
+                    config.customTools.push_back(std::move(recipe));
+                }
+            }
+        } else {
+            errors.add(*node, "`tool` must be an array of tables (use `[[tool]]`)");
         }
     }
 

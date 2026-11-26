@@ -351,3 +351,41 @@ TEST_F(EffectiveOptionsTest, noInstallMissingTurnsItOff)
     EXPECT_FALSE(options->extras.installMissing);
     EXPECT_FALSE(options->extras.installMissingRequested);
 }
+
+TEST_F(EffectiveOptionsTest, powerConfigFieldsMergeWithCliPrecedence)
+{
+    Config config;
+    config.jobName = "from-config";
+    config.warningsAsErrors = true;
+    config.failOn = { "undefined-citation" };
+    config.ignoreWarnings = { "overfull-hbox" };
+    config.searchPaths.texInputs = { "/shared/styles//" };
+    config.extraEnv = { { "MY_VAR", "1" } };
+    config.contentFilters = { { "aux", "^foo" } };
+    config.customTools.push_back(maketex::HashTriggeredTool::Recipe {
+        .name = "custom",
+        .argv = { "tool", "$job" },
+        .triggerExtensions = { ".raw" },
+    });
+
+    auto fromConfig = assembleOptions(argsWithFile(), config);
+    ASSERT_TRUE(fromConfig.has_value()) << fromConfig.error();
+    EXPECT_EQ(fromConfig->build.jobName, "from-config");
+    EXPECT_TRUE(fromConfig->build.diagnosticPolicy.warningsAsErrors);
+    EXPECT_EQ(fromConfig->build.diagnosticPolicy.failOn,
+        (std::vector<std::string> { "undefined-citation" }));
+    EXPECT_EQ(fromConfig->build.diagnosticPolicy.ignore,
+        (std::vector<std::string> { "overfull-hbox" }));
+    EXPECT_EQ(fromConfig->build.searchPaths.texInputs,
+        (std::vector<std::string> { "/shared/styles//" }));
+    EXPECT_EQ(fromConfig->build.customTools.size(), 1u);
+    EXPECT_EQ(fromConfig->build.contentFilters.size(), 1u);
+
+    CliArgs args = argsWithFile();
+    args.jobName = "from-flag";
+    args.warningsAsErrors = false;
+    auto fromFlag = assembleOptions(args, config);
+    ASSERT_TRUE(fromFlag.has_value()) << fromFlag.error();
+    EXPECT_EQ(fromFlag->build.jobName, "from-flag");
+    EXPECT_FALSE(fromFlag->build.diagnosticPolicy.warningsAsErrors);
+}

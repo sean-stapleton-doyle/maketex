@@ -312,6 +312,35 @@ TEST_F(IncrementalTest, engineRequirementHiddenInAClassIsRetried)
     ASSERT_TRUE(run.result.success) << run.result.lastError;
     EXPECT_EQ(run.result.engine, EngineKind::LuaLaTeX);
     EXPECT_TRUE(run.result.retriedEngine);
+    // Retry must not emit a bogus "stored build state was incompatible" notice.
+    for (const auto& d : run.result.diagnostics)
+        EXPECT_EQ(d.message.find("incompatible"), std::string::npos) << d.message;
+
+    // A second run remembers the discovered Unicode engine and stays up to date
+    // without failing pdflatex again.
+    auto warm = fixture.build();
+    ASSERT_TRUE(warm.result.success) << warm.result.lastError;
+    EXPECT_TRUE(warm.upToDate);
+    EXPECT_EQ(warm.result.passes, 0);
+    EXPECT_EQ(warm.result.engine, EngineKind::LuaLaTeX);
+    EXPECT_FALSE(warm.result.retriedEngine);
+}
+
+TEST_F(IncrementalTest, epsFigureInNonTexSubdirectoryBuilds)
+{
+    requirePrograms({ "pdflatex" });
+    if (!hasTexFile("epstopdf.sty") || !hasTexFile("graphicx.sty"))
+        GTEST_SKIP() << "not installed: epstopdf / graphicx";
+    FixtureCopy fixture("graphics-eps");
+    // Move figure.eps into a figures/ directory that contains no .tex files.
+    fs::create_directories(fixture.path("figures"));
+    fs::rename(fixture.path("figure.eps"), fixture.path("figures/figure.eps"));
+    fixture.replace("main.tex", "\\includegraphics[width=6cm]{figure}",
+        "\\includegraphics[width=6cm]{figures/figure}");
+
+    auto run = fixture.build();
+    ASSERT_TRUE(run.result.success) << run.result.lastError;
+    EXPECT_TRUE(fs::exists(fixture.path("main.pdf")));
 }
 
 TEST_F(IncrementalTest, documentsSharingADirectoryKeepTheirState)

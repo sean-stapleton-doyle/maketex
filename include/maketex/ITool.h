@@ -23,6 +23,12 @@ struct ToolInput {
     std::optional<std::string> content;
 };
 
+// Which directory an auxiliary tool prefers as its working directory.
+enum class ToolWorkingDir {
+    Output, // outputDir (default; required by bibtex openout_any=p)
+    Source, // the document's directory (so relative ../ paths resolve)
+};
+
 // Auxiliary LaTeX tools (biber, bibtex, makeindex, etc.).
 //
 // Tools are pure descriptions: whether the document uses them, what their
@@ -43,6 +49,9 @@ public:
 
     // Returns the full argv. argv[0] is looked up via PATH.
     virtual std::vector<std::string> buildArgs(const ToolInvocation& inv) const = 0;
+
+    // Where BuildDriver launches the tool. Defaults to Output (outputDir).
+    virtual ToolWorkingDir workingDirPreference() const { return ToolWorkingDir::Output; }
 
     // Whether the document uses this tool, judged from the latest engine
     // pass — e.g. biber applies when that pass wrote the .bcf. Deciding from

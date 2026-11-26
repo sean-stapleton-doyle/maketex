@@ -123,16 +123,37 @@ namespace {
         }
     }
 
+    void addCommaSeparated(std::set<std::string>& dst, const std::vector<std::string>& lists)
+    {
+        for (const auto& list : lists) {
+            std::string_view rest = list;
+            while (!rest.empty()) {
+                auto comma = rest.find(',');
+                auto name = trim(rest.substr(0, comma));
+                if (!name.empty())
+                    dst.emplace(name);
+                if (comma == std::string_view::npos)
+                    break;
+                rest.remove_prefix(comma + 1);
+            }
+        }
+    }
+
     bool startsDocument(const fs::path& file)
     {
         std::ifstream in(file);
         std::string line;
         // \documentclass comes first in practice; magic comments, a license
-        // header, or \RequirePackage{…} lines may precede it.
+        // header, \DocumentMetadata, or \RequirePackage{…} lines may precede it.
+        // Files using the `subfiles` class are child chapters, not root documents.
         for (int i = 0; i < 200 && std::getline(in, line); ++i) {
             auto code = trim(stripComment(line));
-            if (code.starts_with("\\documentclass"))
+            if (code.starts_with("\\documentclass")) {
+                auto cls = argumentsOf(code, "\\documentclass");
+                if (!cls.empty() && trim(cls.front()) == "subfiles")
+                    return false;
                 return true;
+            }
             if (code.starts_with("\\begin{document}"))
                 return false;
         }
@@ -228,6 +249,10 @@ EngineChoice detectEngine(const fs::path& texFile)
             return { .kind = EngineKind::LuaLaTeX, .reason = std::string("loads ") + pkg };
     if (preamble.contains("\\directlua"))
         return { .kind = EngineKind::LuaLaTeX, .reason = "uses \\directlua" };
+    std::set<std::string> tikzLibs;
+    addCommaSeparated(tikzLibs, argumentsOf(preamble, "\\usetikzlibrary"));
+    if (tikzLibs.contains("graphdrawing"))
+        return { .kind = EngineKind::LuaLaTeX, .reason = "uses tikz graphdrawing library" };
     for (const char* pkg : kXeOnly)
         if (packages.contains(pkg))
             return { .kind = EngineKind::XeLaTeX, .reason = std::string("loads ") + pkg };
@@ -319,15 +344,28 @@ DocumentRequirements analyzeRequirements(const fs::path& texFile)
         need("bibtex", "uses \\bibliography");
     if (uses("makeidx") || uses("imakeidx") || text.contains("\\makeindex"))
         need("makeindex", uses("imakeidx") ? "loads imakeidx" : "makes an index");
-    if (uses("glossaries") || uses("glossaries-extra"))
+    if (uses("nomencl") || text.contains("\\makenomenclature"))
+        need("makeindex", "loads nomencl");
+    if (uses("glossaries-extra")
+        && (text.contains("\\GlsXtrLoadResources")
+            || packageOptions(text, "glossaries-extra").contains("record"))) {
+        need("bib2gls", "uses bib2gls");
+    } else if (uses("glossaries") || uses("glossaries-extra")) {
         need("makeglossaries", uses("glossaries") ? "loads glossaries" : "loads glossaries-extra");
+    }
     if (uses("pythontex"))
         need("pythontex", "loads pythontex");
     if (uses("minted")) {
         need("pygmentize", "loads minted");
         req.needsShellEscape = true;
     }
-    if (uses("svg"))
+    if (uses("svg")) {
+        need("inkscape", "loads svg");
+        req.needsShellEscape = true;
+    }
+    std::set<std::string> tikzLibs;
+    addCommaSeparated(tikzLibs, argumentsOf(text, "\\usetikzlibrary"));
+    if (tikzLibs.contains("external") || text.contains("\\tikzexternalize"))
         req.needsShellEscape = true;
     return req;
 }

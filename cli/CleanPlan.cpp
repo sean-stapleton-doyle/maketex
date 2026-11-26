@@ -15,9 +15,9 @@ namespace {
     // Aux files produced by the engine and the standard tool roster.
     constexpr std::string_view kCleanExtensions[] = {
         ".acn", ".acr", ".alg", ".aux", ".bbl", ".bcf", ".blg", ".fls",
-        ".glg", ".glo", ".gls", ".idx", ".ilg", ".ind", ".ist", ".loa",
-        ".lof", ".log", ".lot", ".nav", ".out", ".pytxcode", ".run.xml",
-        ".snm", ".toc", ".vrb", ".xdy"
+        ".glg", ".glo", ".gls", ".glstex", ".idx", ".ilg", ".ind", ".ist",
+        ".loa", ".lof", ".log", ".lot", ".nav", ".nlg", ".nlo", ".nls",
+        ".out", ".pytxcode", ".run.xml", ".snm", ".toc", ".vrb", ".xdy"
     };
 
     // Usually generated, but also written by hand (custom index styles) or

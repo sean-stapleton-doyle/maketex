@@ -38,6 +38,7 @@ BuildDriver::BuildDriver(IEngine& engine,
     , m_observer(std::move(config.observer))
     , m_processLimits(std::move(config.processLimits))
     , m_contentFilters(std::move(config.contentFilters))
+    , m_diagnosticPolicy(std::move(config.diagnosticPolicy))
 {
 }
 
@@ -59,12 +60,17 @@ void BuildDriver::notify(const BuildEvent& event) const
 
 namespace {
 
-    ToolInvocation makeToolInv(const EngineInvocation& inv)
+    ToolInvocation makeToolInv(const EngineInvocation& inv, const ITool& tool)
     {
+        fs::path sourceDir = inv.texFile.parent_path();
+        fs::path workingDir = tool.workingDirPreference() == ToolWorkingDir::Source
+            ? sourceDir
+            : inv.outputDir;
         return ToolInvocation {
-            .workingDir = inv.outputDir,
+            .workingDir = std::move(workingDir),
             .jobName = inv.resolvedJobName(),
             .outputDir = inv.outputDir,
+            .sourceDir = std::move(sourceDir),
         };
     }
 
@@ -110,6 +116,42 @@ namespace {
             .ran_at = static_cast<int64_t>(std::time(nullptr)),
             .succeeded = succeeded,
         });
+    }
+
+    // Filters ignored non-error diagnostics and promotes warnings to errors
+    // according to policy. Returns an error summary if the policy failed the
+    // build, or empty when the build still passes.
+    std::string applyDiagnosticPolicy(std::vector<Diagnostic>& diagnostics,
+        const DiagnosticPolicy& policy)
+    {
+        if (!policy.ignore.empty()) {
+            std::erase_if(diagnostics, [&](const Diagnostic& d) {
+                return d.severity != Diagnostic::Severity::Error
+                    && !d.category.empty()
+                    && std::ranges::contains(policy.ignore, d.category);
+            });
+        }
+
+        int promoted = 0;
+        std::string firstCategory;
+        for (auto& d : diagnostics) {
+            if (d.severity != Diagnostic::Severity::Warning)
+                continue;
+            bool fail = policy.warningsAsErrors
+                || (!d.category.empty() && std::ranges::contains(policy.failOn, d.category));
+            if (fail) {
+                d.severity = Diagnostic::Severity::Error;
+                if (firstCategory.empty())
+                    firstCategory = d.category;
+                ++promoted;
+            }
+        }
+        if (promoted == 0)
+            return { };
+        if (policy.warningsAsErrors)
+            return std::format("{} warning{} treated as error{}",
+                promoted, promoted == 1 ? "" : "s", promoted == 1 ? "" : "s");
+        return std::format("failed on {} warning{}", firstCategory, promoted == 1 ? "" : "s");
     }
 
 } // namespace
@@ -302,7 +344,7 @@ std::expected<bool, std::error_code> BuildDriver::toolIsStale(const ITool& tool,
 BuildDriver::ToolPassOutcome BuildDriver::runStaleTools(
     const ToolContext& ctx, FileStateTracker& tracker)
 {
-    const auto toolEnv = toolSearchEnv(m_inv.texFile.parent_path());
+    const auto toolEnv = toolSearchEnv(m_inv.texFile.parent_path(), m_inv.extraEnv);
 
     ToolPassOutcome outcome;
     for (auto* tool : m_tools) {
@@ -334,7 +376,7 @@ BuildDriver::ToolPassOutcome BuildDriver::runStaleTools(
 
         notify({ .kind = BuildEvent::Kind::ToolStarted,
             .toolName = std::string(tool->name()) });
-        auto toolInv = makeToolInv(m_inv);
+        auto toolInv = makeToolInv(m_inv, *tool);
         // Evaluated before the launchProcess call: its by-value invocation
         // parameter may be move-constructed before sibling arguments read
         // toolInv (argument evaluation is indeterminately sequenced).
@@ -503,6 +545,12 @@ DriverResult BuildDriver::run()
             // (mtime, size) fast path can skip rehashing.
             persistFileStates();
             result.diagnostics = std::move(tools.diagnostics);
+            if (auto policyError = applyDiagnosticPolicy(result.diagnostics, m_diagnosticPolicy);
+                !policyError.empty()) {
+                result.lastError = std::move(policyError);
+                result.success = false;
+                return result;
+            }
             if (!tools.ranAny) {
                 notify({ .kind = BuildEvent::Kind::SkippedUpToDate });
                 result.upToDate = true;
@@ -602,11 +650,21 @@ DriverResult BuildDriver::run()
             notify({ .kind = BuildEvent::Kind::RerunScheduled, .pass = pass + 2, .detail = why });
         }
         if (reasons.empty()) {
+            result.diagnostics = diagnostics::extract(engineResult);
+            std::ranges::move(toolWarnings, std::back_inserter(result.diagnostics));
+            if (auto policyError = applyDiagnosticPolicy(result.diagnostics, m_diagnosticPolicy);
+                !policyError.empty()) {
+                // Failed by diagnostic policy: don't record as succeeded so
+                // the next invocation does not skip as "up to date".
+                latexRule.markRan(m_db, false, command);
+                persistFileStates();
+                result.lastError = std::move(policyError);
+                result.success = false;
+                return result;
+            }
             latexRule.markRan(m_db, true, command);
             persistFileStates();
             result.success = true;
-            result.diagnostics = diagnostics::extract(engineResult);
-            std::ranges::move(toolWarnings, std::back_inserter(result.diagnostics));
             return result;
         }
     }

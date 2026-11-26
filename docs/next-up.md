@@ -6,17 +6,19 @@ PDF.
 
 ## Auxiliary tools not yet supported
 
-- **nomencl** (`.nlo` → `.nls` via `makeindex -s nomencl.ist`).
 - **Multiple indexes**: imakeidx, splitindex, multind, and the index
-  package write `.idx` files other than `<job>.idx`; only that one is run.
-- **Other glossary back ends**: bib2gls (glossaries-extra) and
-  makeglossaries-lite.
+  package write `.idx` files other than `<job>.idx`; only that one is run
+  (can be wired via `[[tool]]` in `maketex.toml`).
 - **Per-unit bibliographies**: multibib, bibunits, and chapterbib write one
   `.aux` per unit, each needing its own bibtex run.
-- **xindy / texindy / upmendex** in place of makeindex.
-- **biber with an output directory**: biber runs from the output directory
-  instead of receiving `--input-directory`/`--output-directory`.
-- **pythontex and minted caches** under a separate output directory.
+- **Alternative index/glossary binaries**: xindy / texindy / upmendex and
+  makeglossaries-lite (can be wired via `[[tool]]` in `maketex.toml`).
+- **TikZ externalize `mode=list and make`** parallel makefile execution.
+
+## Platforms and distribution
+
+- Windows support (`Process`, file locking, `;` path separators).
+- Homebrew tap / package-manager formulas (GitHub Release tarballs are built via `.github/workflows/release.yml`).
 
 ## Engines and formats
 
