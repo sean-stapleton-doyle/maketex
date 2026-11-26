@@ -9,6 +9,8 @@
 #include <cstdlib>
 #include <format>
 #include <fstream>
+#include <mutex>
+#include <set>
 #include <string_view>
 #include <utility>
 
@@ -40,12 +42,15 @@ namespace {
 
     // Files and programs common enough to answer without a lookup — also
     // the offline fallback. Programs map to the package that ships them.
-    constexpr std::array<std::pair<std::string_view, std::string_view>, 36> kKnown { {
+    constexpr std::array<std::pair<std::string_view, std::string_view>, 40> kKnown { {
         { "biblatex.sty", "biblatex" },
         { "biber", "biber" },
         { "glossaries.sty", "glossaries" },
         { "makeglossaries", "glossaries" },
+        { "makeglossaries-lite", "glossaries" },
         { "glossaries-extra.sty", "glossaries-extra" },
+        { "bib2gls", "bib2gls" },
+        { "xindy", "xindy" },
         { "minted.sty", "minted" },
         { "pythontex.sty", "pythontex" },
         { "pythontex", "pythontex" },
@@ -74,6 +79,7 @@ namespace {
         { "epstopdf.sty", "epstopdf-pkg" },
         { "xcolor.sty", "xcolor" },
         { "geometry.sty", "geometry" },
+        { "subfiles.sty", "subfiles" },
         { "makeindex", "makeindex" },
         { "bibtex", "bibtex" },
         { "latexmk", "latexmk" },
@@ -85,6 +91,9 @@ namespace {
         if (missing == "pygmentize")
             return "minted needs Pygments: pip install pygments (or your system's "
                    "python3-pygments package)";
+        if (missing == "inkscape")
+            return "the svg package needs Inkscape: install it from https://inkscape.org "
+                   "(or brew install --cask inkscape / apt install inkscape)";
         return std::nullopt;
     }
 
@@ -189,11 +198,27 @@ PackageLookup tlmgrLookup(fs::path cacheDir)
             }
         }
 
+        // Avoid repeating an unreachable/timed-out tlmgr search for the same
+        // file within one process (e.g. buildInstallingMissing followed by
+        // addInstallHints when offline), without poisoning the on-disk cache.
+        static std::mutex failedMutex;
+        static std::set<std::pair<fs::path, std::string>> failedThisProcess;
+        {
+            std::lock_guard lock(failedMutex);
+            if (failedThisProcess.contains({ cacheFile, file }))
+                return std::nullopt;
+        }
+
         // Output: a "tlmgr: package repository …" line, then each package
         // name on its own line ending in ':' followed by indented paths.
-        auto out = run({ "tlmgr", "search", "--global", "--file", "/" + file }, 8s);
-        if (!out)
+        // Anchor with '$' because --file takes a Perl regex: without it,
+        // `/foo.sty` would match `/foo.sty.bak` or doc files first.
+        auto out = run({ "tlmgr", "search", "--global", "--file", "/" + file + "$" }, 12s);
+        if (!out) {
+            std::lock_guard lock(failedMutex);
+            failedThisProcess.emplace(cacheFile, file);
             return std::nullopt;
+        }
         std::optional<std::string> package;
         std::string_view rest = *out;
         while (!rest.empty() && !package) {
@@ -223,8 +248,18 @@ bool isInstallable(const Diagnostic& d)
         return false;
     if (d.category == "missing-tool")
         return true;
-    auto ext = fs::path(d.missingFile).extension();
-    return d.category == "missing-file" && (ext == ".sty" || ext == ".cls");
+    if (d.category != "missing-file")
+        return false;
+    // TikZ/PGF libraries ship as *.code.tex; regular .tex files are the
+    // user's own \input sources and must not be looked up in CTAN.
+    if (d.missingFile.ends_with(".code.tex"))
+        return true;
+    static constexpr std::array<std::string_view, 16> kInstallableExts = {
+        ".sty", ".cls", ".ldf", ".bbx", ".cbx", ".lbx", ".dbx", ".bst",
+        ".def", ".clo", ".cfg", ".fd", ".enc", ".map", ".tfm", ".otf"
+    };
+    auto ext = fs::path(d.missingFile).extension().string();
+    return std::ranges::find(kInstallableExts, ext) != kInstallableExts.end();
 }
 
 void addInstallHints(std::vector<Diagnostic>& diagnostics)

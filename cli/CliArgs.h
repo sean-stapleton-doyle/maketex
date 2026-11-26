@@ -27,6 +27,7 @@ struct CliArgs {
     Command command = Command::Build;
 
     std::optional<std::filesystem::path> texFile;
+    std::optional<std::string> jobName;
     std::optional<std::string> engine;
     std::optional<std::string> engineProgram;
     std::vector<std::string> engineOptions;
@@ -38,6 +39,7 @@ struct CliArgs {
     std::optional<int> maxPasses;
     std::optional<int> timeoutSeconds;
     std::optional<bool> installMissing;
+    std::optional<bool> warningsAsErrors;
 
     bool verbose = false;
     bool plain = false;

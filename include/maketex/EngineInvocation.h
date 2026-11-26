@@ -4,6 +4,8 @@
 #include <optional>
 #include <string>
 #include <string_view>
+#include <utility>
+#include <vector>
 
 namespace maketex {
 
@@ -18,6 +20,9 @@ struct EngineInvocation {
     // can't know it needs (e.g. minted 2's outputdir). Empty: the engine is
     // given the tex file directly.
     std::string preamble;
+    // Extra environment variables (including search paths such as TEXINPUTS,
+    // BIBINPUTS, BSTINPUTS, INDEXSTYLE) passed to the engine and tools.
+    std::vector<std::pair<std::string, std::string>> extraEnv;
 
     // The effective TeX job name: explicit jobName if set, else the tex
     // file's stem. Determines the basename of .fls/.log/.aux/.bcf/… files.

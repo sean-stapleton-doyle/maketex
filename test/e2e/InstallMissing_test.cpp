@@ -113,3 +113,63 @@ TEST_F(InstallMissingTest, doctorReportsThenInstallsOnRequest)
     EXPECT_EQ(fixed.exitCode, 0) << fixed.out << fixed.err;
     EXPECT_TRUE(tlmgrInstalled());
 }
+
+TEST_F(InstallMissingTest, doctorFindsLocalClassInSubdirectoryAndHandlesNoClass)
+{
+    auto sub = project("subdoc");
+    write(sub / "paper" / "mycls.cls",
+        "\\NeedsTeXFormat{LaTeX2e}\\ProvidesClass{mycls}\\LoadClass{article}\n");
+    write(sub / "paper" / "main.tex",
+        "\\documentclass{mycls}\n\\begin{document}Hi\\end{document}\n");
+
+    // Run from parent directory: kpsewhich must search paper/, not cwd.
+    auto ok = m_cli->run({ "doctor", "paper/main.tex" }, sub);
+    EXPECT_EQ(ok.exitCode, 0) << ok.out << ok.err;
+    EXPECT_FALSE(contains(ok.out, "mycls.cls  not installed")) << ok.out;
+
+    // A fragment with neither \documentclass nor \usepackage must not underflow.
+    write(sub / "fragment.tex", "Just some text.\n");
+    auto frag = m_cli->run({ "doctor", "fragment.tex" }, sub);
+    EXPECT_EQ(frag.exitCode, 0) << frag.out << frag.err;
+    EXPECT_TRUE(contains(frag.out, "0 packages found")) << frag.out;
+}
+
+TEST_F(InstallMissingTest, batchesMultipleMissingPreamblePackagesInOneCall)
+{
+    // Override fake tlmgr to answer searches for both fake packages and verify
+    // the search pattern is end-anchored (`/$`).
+    m_tools->add("tlmgr",
+        "case \"$1\" in\n"
+        "  search)\n"
+        "    case \"$4\" in\n"
+        "      /maketexfakepkg.sty\\$) echo 'maketexfakepkg:' ;;\n"
+        "      /maketexfakepkg2.sty\\$) echo 'maketexfakepkg2:' ;;\n"
+        "    esac ;;\n"
+        "  install) shift; for p in \"$@\"; do\n"
+        "             printf '\\\\ProvidesPackage{%s}\\n' \"$p\" > '"
+            + m_installed.string() + "'/\"$p\".sty; done ;;\n"
+                                     "esac");
+
+    auto doc = project("batch");
+    write(doc / "main.tex",
+        "\\documentclass{article}\n"
+        "\\usepackage{maketexfakepkg}\n"
+        "\\usepackage{maketexfakepkg2}\n"
+        "\\begin{document}\nHello.\n\\end{document}\n");
+
+    auto r = m_cli->run({ }, doc);
+    EXPECT_EQ(r.exitCode, 0) << r.err;
+    EXPECT_TRUE(fs::exists(doc / "main.pdf"));
+
+    int installCalls = 0;
+    std::string installCmd;
+    for (const auto& call : m_tools->calls()) {
+        if (call.starts_with("tlmgr install ")) {
+            ++installCalls;
+            installCmd = call;
+        }
+    }
+    EXPECT_EQ(installCalls, 1) << "expected one batched tlmgr install call";
+    EXPECT_TRUE(contains(installCmd, "maketexfakepkg")) << installCmd;
+    EXPECT_TRUE(contains(installCmd, "maketexfakepkg2")) << installCmd;
+}

@@ -2,6 +2,7 @@
 
 #include "maketex/Process.h"
 
+#include <algorithm>
 #include <cstdlib>
 #include <system_error>
 
@@ -9,14 +10,29 @@ namespace maketex {
 
 namespace fs = std::filesystem;
 
-std::vector<std::pair<std::string, std::string>> toolSearchEnv(const fs::path& texDir)
+std::vector<std::pair<std::string, std::string>> toolSearchEnv(
+    const fs::path& texDir,
+    const std::vector<std::pair<std::string, std::string>>& extraEnv)
 {
+    auto extraLookup = [&](std::string_view key) -> std::optional<std::string_view> {
+        for (const auto& [k, v] : extraEnv)
+            if (k == key)
+                return v;
+        return std::nullopt;
+    };
+
     std::vector<std::pair<std::string, std::string>> env;
     for (const char* var : { "BIBINPUTS", "BSTINPUTS", "TEXINPUTS", "INDEXSTYLE" }) {
         std::string value = texDir.string() + ":";
-        if (const char* existing = std::getenv(var); existing && *existing)
+        if (auto overridden = extraLookup(var))
+            value += *overridden;
+        else if (const char* existing = std::getenv(var); existing && *existing)
             value += existing;
         env.emplace_back(var, std::move(value));
+    }
+    for (const auto& [k, v] : extraEnv) {
+        if (std::ranges::find(env, k, &std::pair<std::string, std::string>::first) == env.end())
+            env.emplace_back(k, v);
     }
     return env;
 }
@@ -49,7 +65,7 @@ std::optional<fs::path> locateToolInput(std::string_view name,
             "-format=" + std::string(*kpsewhichFormat),
             file.string(),
         };
-        auto env = toolSearchEnv(inv.texFile.parent_path());
+        auto env = toolSearchEnv(inv.texFile.parent_path(), inv.extraEnv);
         auto result = Process(args, inv.outputDir, env).wait();
         auto found = result.stdoutOutput;
         while (!found.empty() && (found.back() == '\n' || found.back() == '\r'))

@@ -170,3 +170,183 @@ TEST_F(CliTest, timeoutStopsALoopingDocument)
     EXPECT_TRUE(contains(r.err, "timed out")) << r.err;
     EXPECT_LT(elapsed, std::chrono::seconds(30));
 }
+
+TEST_F(CliTest, customToolRunsOnTriggerAndConverges)
+{
+    auto dir = project("customtool");
+    auto script = dir / "gen.sh";
+    write(script,
+        "#!/bin/sh\n"
+        "printf 'Generated from: ' > \"$1.gen\"\n"
+        "cat \"$1.raw\" >> \"$1.gen\"\n");
+    fs::permissions(script, fs::perms::owner_all);
+
+    write(dir / "main.tex",
+        "\\documentclass{article}\n"
+        "\\newwrite\\rawout\n"
+        "\\begin{document}\n"
+        "\\immediate\\openout\\rawout=\\jobname.raw\n"
+        "\\immediate\\write\\rawout{hello-custom}\n"
+        "\\immediate\\closeout\\rawout\n"
+        "\\InputIfFileExists{\\jobname.gen}{}{pending}\n"
+        "\\end{document}\n");
+    write(dir / "maketex.toml",
+        "[[tool]]\n"
+        "name = \"gen\"\n"
+        "command = [\""
+            + script.string() + "\", \"$job\"]\n"
+                                "triggers = [\".raw\"]\n"
+                                "outputs = [\".gen\"]\n");
+
+    auto cold = m_cli->run({ }, dir);
+    EXPECT_EQ(cold.exitCode, 0) << cold.err;
+    EXPECT_TRUE(contains(cold.out, "done in 2 passes")) << cold.out;
+    EXPECT_TRUE(fs::exists(dir / ".maketex" / "main.gen"));
+    EXPECT_TRUE(fs::exists(dir / "main.pdf"));
+
+    auto warm = m_cli->run({ }, dir);
+    EXPECT_EQ(warm.exitCode, 0) << warm.err;
+    EXPECT_TRUE(contains(warm.out, "up to date")) << warm.out;
+}
+
+TEST_F(CliTest, texinputsAndBibinputsResolveConfiguredDirectories)
+{
+    if (!maketex::integration::hasProgram("bibtex"))
+        GTEST_SKIP() << "not installed: bibtex";
+    auto dir = project("searchpaths");
+    write(dir / "shared" / "nested" / "mycustom.sty",
+        "\\NeedsTeXFormat{LaTeX2e}\\ProvidesPackage{mycustom}\n"
+        "\\newcommand{\\myhello}{Hello from shared style}\n");
+    write(dir / "bibs" / "external.bib",
+        "@article{ext, author={Ada}, title={Notes}, journal={J}, year={1843}}\n");
+    write(dir / "main.tex",
+        "\\documentclass{article}\n"
+        "\\usepackage{mycustom}\n"
+        "\\begin{document}\n"
+        "\\myhello. See \\cite{ext}.\n"
+        "\\bibliographystyle{plain}\n"
+        "\\bibliography{external}\n"
+        "\\end{document}\n");
+    write(dir / "maketex.toml",
+        "texinputs = [\"shared//\"]\n"
+        "bibinputs = [\"bibs\"]\n");
+
+    auto r = m_cli->run({ }, dir);
+    EXPECT_EQ(r.exitCode, 0) << r.out << r.err;
+    EXPECT_TRUE(fs::exists(dir / "main.pdf"));
+
+    auto doc = m_cli->run({ "doctor", "main.tex" }, dir);
+    EXPECT_EQ(doc.exitCode, 0) << doc.out << doc.err;
+}
+
+TEST_F(CliTest, diagnosticPolicyIgnoresAndFailsOnWarnings)
+{
+    auto dir = project("diagpolicy");
+    write(dir / "main.tex",
+        "\\documentclass{article}\n\\begin{document}\n"
+        "See \\ref{missing-label}.\n"
+        "\\end{document}\n");
+    write(dir / "maketex.toml",
+        "[diagnostics]\n"
+        "fail-on = [\"undefined-reference\"]\n");
+
+    auto first = m_cli->run({ }, dir);
+    EXPECT_EQ(first.exitCode, 1) << first.out << first.err;
+    EXPECT_TRUE(contains(first.err, "undefined-reference")) << first.err;
+
+    // Must NOT report "up to date" on a subsequent run while the failing warning persists.
+    auto second = m_cli->run({ }, dir);
+    EXPECT_EQ(second.exitCode, 1) << second.out << second.err;
+
+    // Ignoring the category lets the build pass quietly.
+    write(dir / "maketex.toml",
+        "[diagnostics]\n"
+        "ignore = [\"undefined-reference\"]\n");
+    auto ignored = m_cli->run({ }, dir);
+    EXPECT_EQ(ignored.exitCode, 0) << ignored.out << ignored.err;
+    EXPECT_FALSE(contains(ignored.err, "missing-label")) << ignored.err;
+
+    // --warnings-as-errors fails on the warning when not ignored.
+    auto werror = m_cli->run({ "--no-config", "--warnings-as-errors" }, dir);
+    EXPECT_EQ(werror.exitCode, 1) << werror.out << werror.err;
+}
+
+TEST_F(CliTest, contentFiltersAllowVolatileAuxToConverge)
+{
+    auto dir = project("filter");
+    write(dir / "main.tex",
+        "\\documentclass{article}\n\\makeatletter\n\\providecommand\\runs{0}\n"
+        "\\AtEndDocument{\\immediate\\write\\@auxout{\\gdef\\string\\runs{\\the\\numexpr\\runs+1\\relax}}}\n"
+        "\\makeatother\n\\begin{document}\nRun \\runs.\n\\end{document}\n");
+    write(dir / "maketex.toml",
+        "[content-filters]\n"
+        "aux = '^\\\\gdef\\s*\\\\runs'\n");
+
+    auto r = m_cli->run({ "--max-passes", "3" }, dir);
+    EXPECT_EQ(r.exitCode, 0) << r.out << r.err;
+    EXPECT_TRUE(fs::exists(dir / "main.pdf"));
+}
+
+TEST_F(CliTest, jobnameConfigAndFlagNameThePublishedPdf)
+{
+    auto dir = project("job");
+    write(dir / "main.tex", kHello);
+    write(dir / "maketex.toml", "jobname = \"paper\"\n");
+
+    auto r1 = m_cli->run({ }, dir);
+    EXPECT_EQ(r1.exitCode, 0) << r1.err;
+    EXPECT_TRUE(fs::exists(dir / "paper.pdf"));
+
+    auto r2 = m_cli->run({ "--jobname", "draft" }, dir);
+    EXPECT_EQ(r2.exitCode, 0) << r2.err;
+    EXPECT_TRUE(fs::exists(dir / "draft.pdf"));
+
+    auto cleaned = m_cli->run({ "clean", "--jobname", "draft", "--all" }, dir);
+    EXPECT_EQ(cleaned.exitCode, 0) << cleaned.err;
+    EXPECT_FALSE(fs::exists(dir / "draft.pdf"));
+    EXPECT_TRUE(fs::exists(dir / "paper.pdf"));
+}
+
+TEST_F(CliTest, subfilesChapterDoesNotCauseRootAmbiguity)
+{
+    auto dir = project("subfiles");
+    write(dir / "thesis.tex",
+        "\\documentclass{article}\n\\begin{document}\nThesis.\n\\end{document}\n");
+    write(dir / "chapter1.tex",
+        "\\documentclass[thesis.tex]{subfiles}\n\\begin{document}\nChapter.\n\\end{document}\n");
+
+    auto r = m_cli->run({ }, dir);
+    EXPECT_EQ(r.exitCode, 0) << r.out << r.err;
+    EXPECT_TRUE(fs::exists(dir / "thesis.pdf"));
+    EXPECT_FALSE(fs::exists(dir / "chapter1.pdf"));
+}
+
+TEST_F(CliTest, nomenclBuiltInToolRunsOnNloFile)
+{
+    if (!maketex::integration::hasProgram("makeindex"))
+        GTEST_SKIP() << "not installed: makeindex";
+    auto dir = project("nomencl");
+    // Minimal nomencl.ist so the test runs even on BasicTeX without nomencl.sty.
+    write(dir / "nomencl.ist",
+        "keyword \"\\\\nomenclatureentry\"\n"
+        "preamble \"\\\\begin{itemize}\\n\"\n"
+        "postamble \"\\n\\\\end{itemize}\\n\"\n");
+    write(dir / "main.tex",
+        "\\documentclass{article}\n"
+        "\\newwrite\\nlofile\n"
+        "\\begin{document}\n"
+        "\\immediate\\openout\\nlofile=\\jobname.nlo\n"
+        "\\immediate\\write\\nlofile{\\string\\nomenclatureentry{a@Alpha}{1}}\n"
+        "\\immediate\\closeout\\nlofile\n"
+        "\\InputIfFileExists{\\jobname.nls}{}{pending}\n"
+        "\\end{document}\n");
+
+    auto cold = m_cli->run({ }, dir);
+    EXPECT_EQ(cold.exitCode, 0) << cold.out << cold.err;
+    EXPECT_TRUE(fs::exists(dir / ".maketex" / "main.nls"));
+    EXPECT_TRUE(fs::exists(dir / "main.pdf"));
+
+    auto warm = m_cli->run({ }, dir);
+    EXPECT_EQ(warm.exitCode, 0) << warm.out << warm.err;
+    EXPECT_TRUE(contains(warm.out, "up to date")) << warm.out;
+}

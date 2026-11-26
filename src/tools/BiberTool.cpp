@@ -8,6 +8,14 @@ namespace maketex {
 
 std::vector<std::string> BiberTool::buildArgs(const ToolInvocation& inv) const
 {
+    if (!inv.outputDir.empty() && inv.outputDir != inv.workingDir) {
+        return {
+            "biber",
+            "--input-directory=" + inv.outputDir.string(),
+            "--output-directory=" + inv.outputDir.string(),
+            inv.jobName,
+        };
+    }
     return { "biber", inv.jobName };
 }
 

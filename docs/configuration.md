@@ -40,6 +40,9 @@ noted.
 # `maketex` with no arguments builds this.
 main = "thesis.tex"
 
+# Override the TeX job name (basename of the output PDF and aux files).
+jobname = "thesis-final"
+
 # TeX engine: "pdflatex", "xelatex", or "lualatex". Default: detected from
 # the document (see USAGE.md, "Choosing the engine").
 engine = "lualatex"
@@ -52,8 +55,15 @@ output-dir = "build"
 
 # Auxiliary tools eligible to run between engine passes, in this order.
 # Replaces (not extends) the default roster:
-#   ["biber", "makeindex", "makeglossaries", "pythontex", "bibtex"]
+#   ["biber", "makeindex", "nomencl", "makeglossaries", "bib2gls", "pythontex", "bibtex"]
 tools = ["biber", "makeindex"]
+
+# Extra kpathsea search directories, resolved against this config file's
+# directory (a trailing "//" enables recursive search).
+texinputs = ["styles//", "../common"]
+bibinputs = ["../bib"]
+bstinputs = ["styles"]
+indexstyle = ["styles"]
 
 # Enable \write18 shell escapes. Default: false.
 shell-escape = false
@@ -84,6 +94,30 @@ program = "lualatex-dev"
 # and before the .tex file.
 extra-options = ["-cnf-line=max_print_line=1000"]
 
+# Arbitrary environment variables passed to the engine and auxiliary tools.
+[env]
+TEXMFHOME = "/path/to/texmf"
+
+# Per-extension ECMAScript regexes for lines ignored when hashing files
+# (merged with built-in filters for .eps CreationDate and .aux \@writefile).
+[content-filters]
+aux = "^\\\\myVolatileStamp\\{"
+
+# Warning and diagnostic policy.
+[diagnostics]
+warnings-as-errors = false
+fail-on = ["undefined-citation", "undefined-reference"]
+ignore = ["overfull-hbox", "underfull-hbox"]
+
+# Declarative custom auxiliary tools (repeatable). Placeholders in `command`:
+# $job (job name), $outdir (output directory), $sourcedir (document directory).
+[[tool]]
+name = "asymptote"
+command = ["asy", "$job-*.asy"]
+triggers = [".asy"]
+outputs = [".pdf"]
+working-dir = "output"   # "output" (default) or "source"
+
 [watch]
 # Polling interval for `maketex watch`. Default: 300.
 interval-ms = 300
@@ -102,6 +136,7 @@ extra-extensions = [".tikz-cache"]
 | Config key | Flag |
 |---|---|
 | `main` | positional `file` argument |
+| `jobname` | `--jobname` |
 | `engine` | `--engine` |
 | `engine-args.program` | `--engine-program` |
 | `engine-args.extra-options` | `--engine-opt` (repeatable) |
@@ -113,6 +148,10 @@ extra-extensions = [".tikz-cache"]
 | `max-passes` | `--max-passes` |
 | `timeout` | `--timeout` |
 | `install-missing` | `--install-missing` / `--no-install-missing` |
+| `diagnostics.warnings-as-errors` | `--warnings-as-errors` / `--no-warnings-as-errors` |
+| `diagnostics.fail-on` / `ignore` | — (config only) |
+| `texinputs` / `bibinputs` / `bstinputs` / `indexstyle` | — (config only) |
+| `env` / `content-filters` / `[[tool]]` | — (config only) |
 | `watch.interval-ms` | `--interval-ms` (watch only) |
 | `watch.extra-paths` | — (config only) |
 | `clean.extra-extensions` | — (config only) |

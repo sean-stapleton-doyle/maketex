@@ -25,12 +25,14 @@ public:
         // Output extensions the engine reads back; empty when the outputs
         // are not known (see ITool::outputs).
         std::vector<std::string> outputExtensions;
+        ToolWorkingDir workingDir = ToolWorkingDir::Output;
     };
 
     explicit HashTriggeredTool(Recipe recipe);
 
     std::string_view name() const override { return m_recipe.name; }
     InvokerKind invokerKind() const override { return m_recipe.kind; }
+    ToolWorkingDir workingDirPreference() const override { return m_recipe.workingDir; }
     std::vector<std::string> buildArgs(const ToolInvocation& inv) const override;
 
     bool applies(const ToolContext& ctx) const override;

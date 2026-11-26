@@ -41,6 +41,17 @@ struct DriverResult {
     std::vector<Diagnostic> diagnostics; // extracted from engine/tool output
 };
 
+// Controls how warnings affect the build outcome and which non-error
+// diagnostic categories are muted.
+struct DiagnosticPolicy {
+    bool warningsAsErrors = false;
+    // Warning categories that fail the build even when warningsAsErrors is off
+    // (e.g. "undefined-citation", "undefined-reference").
+    std::vector<std::string> failOn;
+    // Non-error categories to suppress (e.g. "overfull-hbox", "underfull-hbox").
+    std::vector<std::string> ignore;
+};
+
 // Drives the full multi-pass latex compilation loop.
 //
 // Algorithm:
@@ -83,6 +94,7 @@ public:
             { "eps", std::regex { R"(^%%CreationDate: )" } },
             { "aux", std::regex { R"(^\\@writefile\{)" } },
         };
+        DiagnosticPolicy diagnosticPolicy;
     };
 
     // engine, db, and hasher are non-owning — caller must ensure they
@@ -207,6 +219,7 @@ private:
     BuildObserver m_observer;
     WaitLimits m_processLimits;
     std::vector<std::pair<std::string, std::regex>> m_contentFilters;
+    DiagnosticPolicy m_diagnosticPolicy;
 
     BuildGraph m_graph;
 };

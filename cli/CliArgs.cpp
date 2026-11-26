@@ -29,9 +29,9 @@ std::vector<std::string> normalizeArgv(std::vector<std::string> args)
     // document, so `maketex paper watch` stays a build of paper — and an
     // option's value is not a positional word (`-o build` names a
     // directory, not the build command).
-    static constexpr std::string_view kTakesValue[] = { "-o", "--output-dir", "--engine",
-        "--engine-program", "--engine-opt", "--tools", "--max-passes", "--timeout", "--format",
-        "--config", "--interval-ms" };
+    static constexpr std::string_view kTakesValue[] = { "-o", "--output-dir", "--jobname",
+        "--engine", "--engine-program", "--engine-opt", "--tools", "--max-passes", "--timeout",
+        "--format", "--config", "--interval-ms" };
     auto firstNonFlag = args.end();
     for (auto it = args.begin(); it != args.end(); ++it) {
         if (!it->starts_with('-')) {
@@ -68,6 +68,8 @@ namespace {
     void addBuildOptions(CLI::App& sub, CliArgs& out)
     {
         sub.add_option("file", out.texFile, "Root .tex file");
+        sub.add_option("--jobname", out.jobName,
+            "Override the TeX job name (basename of the PDF and aux files)");
         sub.add_option("--engine", out.engine,
             "TeX engine: pdflatex, xelatex, or lualatex");
         sub.add_option("--engine-program", out.engineProgram,
@@ -76,7 +78,7 @@ namespace {
             "Extra option passed through to the engine verbatim (repeatable)");
         sub.add_option("--tools", out.tools,
             "Comma-separated auxiliary tool roster "
-            "(biber,bibtex,makeindex,makeglossaries,pythontex)");
+            "(biber,bibtex,makeindex,nomencl,makeglossaries,bib2gls,pythontex)");
         sub.add_option("-o,--output-dir", out.outputDir,
             "Directory for build outputs and the state database");
         // Every boolean has both spellings so a flag can undo the config.
@@ -102,6 +104,12 @@ namespace {
                "Give up after this many engine passes")
             ->check(CLI::PositiveNumber);
         addInstallMissing(sub, out);
+        sub.add_flag_callback(
+            "--warnings-as-errors", [&out] { out.warningsAsErrors = true; },
+            "Treat any LaTeX or tool warning as a build failure");
+        sub.add_flag_callback(
+            "--no-warnings-as-errors", [&out] { out.warningsAsErrors = false; },
+            "Allow warnings without failing the build (default)");
         sub.add_option("--timeout", out.timeoutSeconds,
                "Kill any engine or tool run that takes longer than this many seconds")
             ->check(CLI::PositiveNumber);
@@ -147,6 +155,8 @@ ParseResult parseCliArgs(const std::vector<std::string>& args)
 
     auto* clean = app.add_subcommand("clean", "Remove generated files");
     clean->add_option("file", out.texFile, "Root .tex file whose outputs to clean");
+    clean->add_option("--jobname", out.jobName,
+        "Job name whose outputs to clean (if built with --jobname)");
     clean->add_option("-o,--output-dir", out.outputDir,
         "Directory the outputs were built into");
     addCommonOptions(*clean, out);

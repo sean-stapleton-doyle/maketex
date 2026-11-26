@@ -11,9 +11,11 @@ class ITool;
 // The auxiliary tools maketex can run between engine passes.
 enum class ToolKind {
     Biber,
+    Bib2gls,
     Bibtex,
     Makeglossaries,
     Makeindex,
+    Nomencl,
     Pythontex,
 };
 

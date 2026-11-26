@@ -174,10 +174,23 @@ void StateDatabase::forgetJob(const std::string& jobName)
 {
     SQLite::Transaction tx(*m_db);
     deleteJobRules(jobName);
-    SQLite::Statement del(*m_db, "DELETE FROM meta WHERE key = ?");
+    SQLite::Statement del(*m_db, "DELETE FROM meta WHERE key = ? OR key LIKE ?");
     del.bind(1, "fingerprint:" + jobName);
+    del.bind(2, "job:" + jobName + ":%");
     del.exec();
     tx.commit();
+}
+
+std::optional<std::string> StateDatabase::getJobMeta(const std::string& jobName,
+    const std::string& key) const
+{
+    return getMeta("job:" + jobName + ":" + key);
+}
+
+void StateDatabase::setJobMeta(const std::string& jobName,
+    const std::string& key, const std::string& value)
+{
+    setMeta("job:" + jobName + ":" + key, value);
 }
 
 // ── File state ────────────────────────────────────────────────────────────────

@@ -884,6 +884,16 @@ namespace {
                 { "Warning: ", false, kWarning, false } });
     }
 
+    // bib2gls writes "Error: ..." / "Warning: ..." lines.
+    std::vector<Diagnostic> extractBib2gls(const std::string& output)
+    {
+        return extractByLinePatterns(output,
+            { { "Error: ", false, kError, false },
+                { "ERROR: ", false, kError, false },
+                { "Warning: ", false, kWarning, false },
+                { "WARNING: ", false, kWarning, false } });
+    }
+
     // pythontex reports structured messages as "PythonTeX error" / "PythonTeX
     // warning" lines, followed by detail lines indented with spaces.
     std::vector<Diagnostic> extractPythontex(const std::string& output)
@@ -891,6 +901,21 @@ namespace {
         return extractByLinePatterns(output,
             { { "PythonTeX error", false, kError, false },
                 { "PythonTeX warning", false, kWarning, false } });
+    }
+
+    // Custom tools have arbitrary output; pick up conventional error/warning
+    // prefixes and let the fallback surface full output if nothing matches.
+    std::vector<Diagnostic> extractCustomTool(const std::string& output)
+    {
+        return extractByLinePatterns(output,
+            { { "ERROR: ", false, kError, true },
+                { "Error: ", false, kError, true },
+                { "error: ", false, kError, true },
+                { "!! ", true, kError, true },
+                { "WARNING: ", false, kWarning, true },
+                { "Warning: ", false, kWarning, true },
+                { "warning: ", false, kWarning, true },
+                { "## ", true, kWarning, true } });
     }
 
     // ── fallback ──────────────────────────────────────────────────────────────
@@ -1001,8 +1026,14 @@ namespace diagnostics {
         case InvokerKind::Makeglossaries:
             diags = extractMakeglossaries(output);
             break;
+        case InvokerKind::Bib2gls:
+            diags = extractBib2gls(output);
+            break;
         case InvokerKind::Pythontex:
             diags = extractPythontex(output);
+            break;
+        case InvokerKind::Custom:
+            diags = extractCustomTool(output);
             break;
         default:
             break;

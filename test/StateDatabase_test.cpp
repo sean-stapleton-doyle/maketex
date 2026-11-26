@@ -259,3 +259,21 @@ TEST(StateDatabase, ruleInputsDecodeAgainstCurrentRoot)
     EXPECT_NE(std::find(paths.begin(), paths.end(), "/usr/texmf/article.cls"),
         paths.end());
 }
+
+TEST(StateDatabaseTest, jobMetaIsScopedPerJobAndClearedByForgetJob)
+{
+    auto raw = std::make_unique<SQLite::Database>(":memory:",
+        SQLite::OPEN_READWRITE | SQLite::OPEN_CREATE);
+    StateDatabase db(std::move(raw));
+
+    EXPECT_FALSE(db.getJobMeta("paper", "detected_engine").has_value());
+    db.setJobMeta("paper", "detected_engine", "lualatex");
+    db.setJobMeta("slides", "detected_engine", "xelatex");
+
+    EXPECT_EQ(db.getJobMeta("paper", "detected_engine"), "lualatex");
+    EXPECT_EQ(db.getJobMeta("slides", "detected_engine"), "xelatex");
+
+    db.forgetJob("paper");
+    EXPECT_FALSE(db.getJobMeta("paper", "detected_engine").has_value());
+    EXPECT_EQ(db.getJobMeta("slides", "detected_engine"), "xelatex");
+}

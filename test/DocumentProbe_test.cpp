@@ -117,3 +117,50 @@ TEST_F(DocumentProbeTest, biblatexWithBibtexBackendNeedsBibtex)
     ASSERT_EQ(req.programs.size(), 1u);
     EXPECT_EQ(req.programs[0].first, "bibtex");
 }
+
+TEST_F(DocumentProbeTest, subfilesChaptersAreNotRootDocuments)
+{
+    writeFile("thesis.tex", "\\documentclass{book}\n\\usepackage{subfiles}\n\\begin{document}\\end{document}\n");
+    writeFile("ch1.tex", "\\documentclass[thesis.tex]{subfiles}\n\\begin{document}Ch 1\\end{document}\n");
+    auto roots = maketex::findRootDocuments(m_dir);
+    ASSERT_EQ(roots.size(), 1u);
+    EXPECT_EQ(roots[0].filename(), "thesis.tex");
+}
+
+TEST_F(DocumentProbeTest, tikzGraphdrawingSelectsLualatex)
+{
+    auto tex = writeFile("main.tex",
+        "\\documentclass{article}\n\\usepackage{tikz}\n"
+        "\\usetikzlibrary{arrows, graphdrawing}\n\\begin{document}\\end{document}\n");
+    auto choice = detectEngine(tex);
+    EXPECT_EQ(choice.kind, EngineKind::LuaLaTeX);
+    EXPECT_NE(choice.reason.find("graphdrawing"), std::string::npos);
+}
+
+TEST_F(DocumentProbeTest, detectsTikzExternalizeSvgNomenclAndBib2gls)
+{
+    auto tikz = writeFile("tikz.tex",
+        "\\documentclass{article}\n\\usepackage{tikz}\n"
+        "\\usetikzlibrary{external}\n\\tikzexternalize\n\\begin{document}\\end{document}\n");
+    EXPECT_TRUE(maketex::analyzeRequirements(tikz).needsShellEscape);
+
+    auto svg = writeFile("svg.tex",
+        "\\documentclass{article}\n\\usepackage{svg}\n\\begin{document}\\end{document}\n");
+    auto svgReq = maketex::analyzeRequirements(svg);
+    EXPECT_TRUE(svgReq.needsShellEscape);
+    ASSERT_EQ(svgReq.programs.size(), 1u);
+    EXPECT_EQ(svgReq.programs[0].first, "inkscape");
+
+    auto nom = writeFile("nom.tex",
+        "\\documentclass{article}\n\\usepackage{nomencl}\n\\makenomenclature\n");
+    auto nomReq = maketex::analyzeRequirements(nom);
+    ASSERT_EQ(nomReq.programs.size(), 1u);
+    EXPECT_EQ(nomReq.programs[0].first, "makeindex");
+
+    auto b2g = writeFile("b2g.tex",
+        "\\documentclass{article}\n\\usepackage[record]{glossaries-extra}\n"
+        "\\GlsXtrLoadResources[src={terms}]\n");
+    auto b2gReq = maketex::analyzeRequirements(b2g);
+    ASSERT_EQ(b2gReq.programs.size(), 1u);
+    EXPECT_EQ(b2gReq.programs[0].first, "bib2gls");
+}

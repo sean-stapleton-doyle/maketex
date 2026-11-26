@@ -40,5 +40,7 @@ if(MAKETEX_BUILD_CLI)
     target_link_libraries(maketex_app PRIVATE maketex_cli_core maketex_build_settings)
 
     include(GNUInstallDirs)
-    install(TARGETS maketex_app RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR})
+    install(TARGETS maketex_app
+        RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}
+        COMPONENT maketex)
 endif()

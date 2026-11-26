@@ -91,3 +91,33 @@ TEST_F(ConfirmTest, explicitRequestSkipsTheQuestion)
     EXPECT_TRUE(ranSudo());
     EXPECT_EQ(r.exitCode, 0) << r.out;
 }
+
+TEST_F(ConfirmTest, transitiveDependencyDoesNotRepromptAfterYes)
+{
+    m_tools->add("tlmgr",
+        "case \"$1\" in\n"
+        "  search)\n"
+        "    case \"$4\" in\n"
+        "      /maketexfakepkg.sty*) echo 'maketexfakepkg:' ;;\n"
+        "      /maketexdep.sty*) echo 'maketexdep:' ;;\n"
+        "    esac ;;\n"
+        "  install) shift; for p in \"$@\"; do\n"
+        "    if [ \"$p\" = maketexfakepkg ]; then\n"
+        "      printf '\\\\ProvidesPackage{maketexfakepkg}\\n\\\\RequirePackage{maketexdep}\\n' > '"
+            + m_installed.string() + "/maketexfakepkg.sty'\n"
+                                     "    else\n"
+                                     "      printf '\\\\ProvidesPackage{%s}\\n' \"$p\" > '"
+            + m_installed.string() + "'/\"$p\".sty\n"
+                                     "    fi\n"
+                                     "  done ;;\n"
+                                     "esac");
+
+    // Only one "y\n" supplied: the transitive dependency must install without
+    // prompting [Y/n] a second time.
+    auto r = m_cli->runInTerminal({ "--plain" }, m_doc, "y\n");
+    EXPECT_EQ(r.exitCode, 0) << r.out;
+    EXPECT_TRUE(fs::exists(m_doc / "main.pdf"));
+    auto firstPrompt = r.out.find("[Y/n]");
+    ASSERT_NE(firstPrompt, std::string::npos) << r.out;
+    EXPECT_EQ(r.out.find("[Y/n]", firstPrompt + 5), std::string::npos) << r.out;
+}

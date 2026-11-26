@@ -1,5 +1,8 @@
 #include "PackageInstaller.h"
 
+#include "PathUtil.h"
+
+#include "maketex/DocumentProbe.h"
 #include "maketex/Process.h"
 
 #include <algorithm>
@@ -20,7 +23,50 @@ namespace maketex::cli {
 
 namespace {
 
-    constexpr int kMaxInstallRounds = 10;
+    constexpr int kMaxInstallRounds = 20;
+
+    // Batch-checks the document's preamble packages and required programs so
+    // a first-time build on BasicTeX installs all missing preamble packages in
+    // one `tlmgr install` call instead of failing one package per round.
+    std::vector<Diagnostic> preambleMissingDiagnostics(const fs::path& texFile)
+    {
+        auto req = analyzeRequirements(texFile);
+        std::vector<std::string> files;
+        if (!req.documentClass.empty())
+            files.push_back(req.documentClass + ".cls");
+        for (const auto& p : req.packages)
+            files.push_back(p + ".sty");
+
+        std::vector<Diagnostic> missing;
+        const fs::path docDir = texFile.parent_path();
+        if (!files.empty()) {
+            std::vector<std::string> args { "kpsewhich" };
+            args.insert(args.end(), files.begin(), files.end());
+            try {
+                auto r = Process(args, docDir).wait({ .timeout = std::chrono::seconds(30) });
+                std::set<std::string> found;
+                std::string_view rest = r.stdoutOutput;
+                while (!rest.empty()) {
+                    auto nl = rest.find('\n');
+                    auto line = rest.substr(0, nl);
+                    if (!line.empty())
+                        found.insert(fs::path(line).filename().string());
+                    rest = nl == std::string_view::npos ? std::string_view { } : rest.substr(nl + 1);
+                }
+                for (const auto& f : files) {
+                    std::error_code ec;
+                    if (!found.contains(f) && !fs::is_regular_file(docDir / f, ec))
+                        missing.push_back({ .category = "missing-file", .missingFile = f });
+                }
+            } catch (const std::system_error&) {
+                // kpsewhich unavailable; rely on the engine's own diagnostic.
+            }
+        }
+        for (const auto& [program, why] : req.programs)
+            if (!findProgram(program))
+                missing.push_back({ .category = "missing-tool", .missingFile = program });
+        return missing;
+    }
 
     std::string joined(const std::vector<std::string>& items)
     {
@@ -162,9 +208,17 @@ BuildResult buildInstallingMissing(const BuildOptions& options, const InstallPol
     PackageLookup lookup;
 
     BuildResult result;
+    bool confirmed = false;
+    bool checkedPreamble = false;
     for (int round = 0; round <= kMaxInstallRounds; ++round) {
         result = runBuild(options);
         if (result.success || round == kMaxInstallRounds)
+            break;
+
+        // Only pay for kpsewhich / tlmgr when the build actually failed for
+        // something installable.
+        bool hasInstallable = std::ranges::any_of(result.diagnostics, isInstallable);
+        if (!hasInstallable)
             break;
 
         if (!distro) {
@@ -172,7 +226,17 @@ BuildResult buildInstallingMissing(const BuildOptions& options, const InstallPol
             if (*distro == TexDistribution::TexLive)
                 lookup = tlmgrLookup(userCacheDir());
         }
-        auto plan = planInstall(result.diagnostics, lookup);
+
+        // On the first missing-package failure, also scan the preamble so all
+        // missing declared packages/tools install in a single tlmgr invocation.
+        std::vector<Diagnostic> toPlan = result.diagnostics;
+        if (!checkedPreamble && *distro == TexDistribution::TexLive) {
+            checkedPreamble = true;
+            auto extra = preambleMissingDiagnostics(options.texFile);
+            toPlan.insert(toPlan.end(), extra.begin(), extra.end());
+        }
+
+        auto plan = planInstall(toPlan, lookup);
         std::erase_if(plan.packages, [&](const std::string& p) { return attempted.contains(p); });
         if (plan.packages.empty())
             break;
@@ -190,12 +254,15 @@ BuildResult buildInstallingMissing(const BuildOptions& options, const InstallPol
             break;
         }
         // Installing by default must not spring a password prompt on
-        // someone who never asked: say what is about to happen first.
-        if (capability->access == InstallCapability::Access::Sudo && !policy.requested) {
+        // someone who never asked: say what is about to happen first. Once
+        // confirmed for this build, follow-up transitive dependencies install
+        // without asking again.
+        if (capability->access == InstallCapability::Access::Sudo && !policy.requested && !confirmed) {
             auto question = std::format("maketex: {} {} not installed. Install with `sudo tlmgr install {}`?",
                 joined(plan.packages), plan.packages.size() == 1 ? "is" : "are", joined(plan.packages));
             if (!policy.confirm || !policy.confirm(question))
                 break;
+            confirmed = true;
         }
         for (const auto& p : plan.packages)
             attempted.insert(p);

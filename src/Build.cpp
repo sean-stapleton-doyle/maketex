@@ -6,9 +6,12 @@
 #include "maketex/ITool.h"
 #include "maketex/Process.h"
 #include "maketex/StateDatabase.h"
+#include "maketex/ToolContext.h"
 #include "maketex/ToolFactory.h"
 #include "maketex/engines/EngineFactory.h"
+#include "maketex/parsers/AuxParser.h"
 #include "maketex/parsers/FlsParser.h"
+#include "maketex/parsers/LogParser.h"
 #include "maketex/tools/InputLocator.h"
 
 #include <SQLiteCpp/SQLiteCpp.h>
@@ -21,8 +24,10 @@
 
 #include <algorithm>
 #include <array>
+#include <charconv>
 #include <format>
 #include <fstream>
+#include <map>
 #include <memory>
 #include <optional>
 #include <string>
@@ -117,6 +122,39 @@ namespace {
         return { std::move(arguments), std::move(jobName) };
     }
 
+    // Joins configured kpathsea search directories with ':' and appends any
+    // inherited value (or a trailing ':' so TeX Live's built-in defaults stay
+    // on the search path).
+    std::vector<std::pair<std::string, std::string>> resolvedEnv(
+        const BuildOptions& options)
+    {
+        std::vector<std::pair<std::string, std::string>> env = options.extraEnv;
+        auto addSearchPath = [&](const char* var, const std::vector<std::string>& dirs) {
+            if (dirs.empty())
+                return;
+            std::string value;
+            for (const auto& d : dirs) {
+                value += d;
+                value += ':';
+            }
+            auto existingIt = std::ranges::find(env, std::string_view(var),
+                &std::pair<std::string, std::string>::first);
+            if (existingIt != env.end()) {
+                value += existingIt->second;
+                existingIt->second = std::move(value);
+                return;
+            }
+            if (const char* inherited = std::getenv(var); inherited && *inherited)
+                value += inherited;
+            env.emplace_back(var, std::move(value));
+        };
+        addSearchPath("TEXINPUTS", options.searchPaths.texInputs);
+        addSearchPath("BIBINPUTS", options.searchPaths.bibInputs);
+        addSearchPath("BSTINPUTS", options.searchPaths.bstInputs);
+        addSearchPath("INDEXSTYLE", options.searchPaths.indexStyle);
+        return env;
+    }
+
     // A readable summary of everything that changes what the engine and
     // tools produce. A stored database whose fingerprint differs was built
     // under different semantics, so its hashes must not drive incremental
@@ -139,12 +177,67 @@ namespace {
             fp += tool->name();
             fp += ',';
         }
+        for (const auto& c : options.customTools) {
+            fp += ";custom=";
+            fp += c.name;
+            fp += ':';
+            for (const auto& a : c.argv) {
+                fp += a;
+                fp += ' ';
+            }
+            for (const auto& t : c.triggerExtensions) {
+                fp += t;
+                fp += ',';
+            }
+            for (const auto& o : c.outputExtensions) {
+                fp += o;
+                fp += ',';
+            }
+            fp += c.workingDir == ToolWorkingDir::Source ? 'S' : 'O';
+        }
         fp += ";shellEscape=";
         fp += options.shellEscape ? '1' : '0';
         fp += ";synctex=";
         fp += options.synctex ? '1' : '0';
         fp += ";haltOnError=";
         fp += options.haltOnError ? '1' : '0';
+        fp += ";werror=";
+        fp += options.diagnosticPolicy.warningsAsErrors ? '1' : '0';
+        for (const auto& f : options.diagnosticPolicy.failOn) {
+            fp += ";failOn=";
+            fp += f;
+        }
+        for (const auto& ig : options.diagnosticPolicy.ignore) {
+            fp += ";ignore=";
+            fp += ig;
+        }
+        for (const auto& [ext, pat] : options.contentFilters) {
+            fp += ";filter=";
+            fp += ext;
+            fp += ':';
+            fp += pat;
+        }
+        for (const auto& [k, v] : options.extraEnv) {
+            fp += ";env:";
+            fp += k;
+            fp += '=';
+            fp += v;
+        }
+        auto appendPaths = [&](std::string_view tag, const std::vector<std::string>& ps) {
+            if (ps.empty())
+                return;
+            fp += ';';
+            fp += tag;
+            fp += '=';
+            for (const auto& p : ps) {
+                fp += p;
+                fp += ':';
+            }
+        };
+        appendPaths("cfgTEXINPUTS", options.searchPaths.texInputs);
+        appendPaths("cfgBIBINPUTS", options.searchPaths.bibInputs);
+        appendPaths("cfgBSTINPUTS", options.searchPaths.bstInputs);
+        appendPaths("cfgINDEXSTYLE", options.searchPaths.indexStyle);
         // Where the engine and tools look for inputs changes what they
         // produce as surely as a flag does. The user's own values only: the
         // document directory maketex adds must stay out, or moving the
@@ -186,9 +279,21 @@ namespace {
         int m_fd;
     };
 
+    bool shouldMirrorForFile(const fs::path& p)
+    {
+        static constexpr std::array<std::string_view, 11> kExts = {
+            ".tex", ".eps", ".ps", ".svg", ".pdf", ".png", ".jpg", ".jpeg",
+            ".tikz", ".pgf", ".bib"
+        };
+        auto ext = p.extension().string();
+        return std::ranges::find(kExts, ext) != kExts.end();
+    }
+
     // \include{chapters/one} makes the engine write chapters/one.aux under
-    // -output-directory, and TeX cannot create directories: mirror every
-    // source directory that holds .tex files into the output directory.
+    // -output-directory, and tools/packages like epstopdf, svg, and TikZ
+    // externalize write converted assets into figure subdirectories. TeX
+    // cannot create directories, so mirror source subdirectories that hold
+    // TeX/graphics assets into the output directory.
     void mirrorSourceDirectories(const fs::path& texDir, const fs::path& outDir)
     {
         std::error_code ec;
@@ -207,13 +312,13 @@ namespace {
             auto name = entry.path().filename().string();
             if (entry.is_directory(ec)) {
                 // Hidden dirs (.git, .maketex), the output dir, and
-                // dependency trees never hold \include'd chapters.
-                if (name.starts_with('.') || name == "node_modules"
+                // dependency trees never hold document inputs.
+                if (name.starts_with('.') || name == "node_modules" || name == "__pycache__"
                     || fs::weakly_canonical(entry.path(), ec) == outCanonical)
                     it.disable_recursion_pending();
                 continue;
             }
-            if (entry.path().extension() != ".tex")
+            if (!shouldMirrorForFile(entry.path()))
                 continue;
             auto rel = fs::relative(entry.path().parent_path(), texDir, ec);
             if (!ec && !rel.empty() && rel != ".")
@@ -232,62 +337,130 @@ namespace {
     }
 
     // Whether a failed pdflatex build failed because the document needs a
-    // Unicode engine (fontspec, unicode-math, … loaded where the preamble
-    // scan could not see them, e.g. from a custom class).
+    // Unicode engine (fontspec, unicode-math, luacode, graphdrawing, … loaded
+    // where the preamble scan could not see them, e.g. from a custom class).
     std::optional<EngineKind> unicodeEngineNeeded(const DriverResult& result)
     {
         for (const auto& d : result.diagnostics) {
             const auto& m = d.message;
-            // Matched on a prefix: fontspec's message continues on a
-            // "(fontspec)" line ("… requires either XeTeX or\n LuaTeX.").
+            // Matched on prefixes/phrases; check the "either / LuaTeX" cases
+            // before XeTeX-only ones so "requires XeTeX or LuaTeX" selects
+            // LuaLaTeX rather than matching "requires XeTeX".
             if (m.contains("requires either XeTeX or") || m.contains("XeLaTeX or LuaLaTeX")
-                || m.contains("Cannot be run with pdfLaTeX") || m.contains("requires LuaTeX"))
+                || m.contains("XeTeX or LuaTeX") || m.contains("Cannot be run with pdfLaTeX")
+                || m.contains("requires LuaTeX") || m.contains("LuaTeX is required")
+                || m.contains("run LuaTeX") || m.contains("need LuaTeX")
+                || m.contains("requires LuaLaTeX") || m.contains("LuaLaTeX is required"))
                 return EngineKind::LuaLaTeX;
-            if (m.contains("requires XeTeX") || m.contains("XeTeX is required"))
+            if (m.contains("requires XeTeX") || m.contains("XeTeX is required")
+                || m.contains("requires XeLaTeX") || m.contains("XeLaTeX is required"))
                 return EngineKind::XeLaTeX;
         }
         return std::nullopt;
     }
 
+    std::optional<EngineKind> loadDetectedEngine(const BuildOptions& options)
+    {
+        fs::path dbPath = options.resolvedOutputDir() / ".maketex.db";
+        std::error_code ec;
+        if (!fs::is_regular_file(dbPath, ec))
+            return std::nullopt;
+        try {
+            SQLite::Database db(dbPath.string(), SQLite::OPEN_READONLY);
+            db.setBusyTimeout(10'000);
+            SQLite::Statement q(db, "SELECT value FROM meta WHERE key = ?");
+            q.bind(1, "job:" + jobNameFor(options) + ":detected_engine");
+            if (!q.executeStep())
+                return std::nullopt;
+            return parseEngineKind(q.getColumn(0).getString());
+        } catch (const std::exception&) {
+            return std::nullopt;
+        }
+    }
+
+    void saveDetectedEngine(const BuildOptions& options, EngineKind engine)
+    {
+        fs::path dbPath = options.resolvedOutputDir() / ".maketex.db";
+        try {
+            auto db = std::make_unique<SQLite::Database>(
+                dbPath.string(), SQLite::OPEN_READWRITE | SQLite::OPEN_CREATE);
+            StateDatabase stateDb(std::move(db));
+            stateDb.setJobMeta(jobNameFor(options), "detected_engine",
+                std::string(engineKindName(engine)));
+        } catch (const std::exception&) {
+            // Best-effort cache; the build already succeeded.
+        }
+    }
+
     // minted before v3 runs pygmentize from the document directory but
     // expects its files where the engine writes them, so with an output
     // directory it needs `outputdir` (minted 3, TeX Live 2024+, finds it
-    // itself). The document can't know maketex moved its outputs, so maketex
-    // passes the option. Returns the TeX code to run first, or empty.
-    std::string mintedPreamble(const fs::path& texFile, const fs::path& outDir)
+    // itself). Similarly, TikZ externalization spawns a child TeX process
+    // that does not inherit `-output-directory` unless `external/system call`
+    // passes it. Returns any TeX preamble hooks to run before the document.
+    std::string buildPreambleHooks(const fs::path& texFile, const fs::path& outDir,
+        EngineKind engineKind, std::string_view engineProgram, bool shellEscape)
     {
+        std::error_code ec;
+        if (fs::equivalent(texFile.parent_path(), outDir, ec))
+            return { };
+
+        auto rel = fs::relative(outDir, texFile.parent_path(), ec).generic_string();
+        if (ec || rel.empty() || rel == ".")
+            return { };
+
+        std::string preamble;
         auto req = analyzeRequirements(texFile);
-        if (std::ranges::find(req.packages, "minted") == req.packages.end())
-            return { };
-        std::string sty;
-        try {
-            auto r = Process(std::vector<std::string> { "kpsewhich", "minted.sty" })
-                         .wait({ .timeout = std::chrono::seconds(5) });
-            sty = r.stdoutOutput.substr(0, r.stdoutOutput.find('\n'));
-        } catch (const std::system_error&) {
-            return { };
+        if (std::ranges::find(req.packages, "minted") != req.packages.end()) {
+            std::string sty;
+            try {
+                auto r = Process(std::vector<std::string> { "kpsewhich", "minted.sty" })
+                             .wait({ .timeout = std::chrono::seconds(5) });
+                sty = r.stdoutOutput.substr(0, r.stdoutOutput.find('\n'));
+            } catch (const std::system_error&) {
+            }
+            std::ifstream in(sty);
+            std::string line;
+            bool v2 = false;
+            for (int i = 0; i < 60 && std::getline(in, line); ++i) {
+                if (auto v = line.find(" v"); line.contains("Yet another Pygments shim") && v != std::string::npos) {
+                    int major = 0;
+                    const char* first = line.data() + v + 2;
+                    const char* last = line.data() + line.size();
+                    auto [ptr, parseEc] = std::from_chars(first, last, major);
+                    v2 = parseEc == std::errc { } && major < 3;
+                    break;
+                }
+            }
+            if (v2)
+                preamble += "\\PassOptionsToPackage{outputdir=" + rel + "}{minted}";
         }
-        std::ifstream in(sty);
-        std::string line;
-        bool v2 = false;
-        for (int i = 0; i < 60 && std::getline(in, line); ++i) {
-            if (auto v = line.find(" v"); line.contains("Yet another Pygments shim") && v != std::string::npos) {
-                v2 = line.substr(v + 2, 1) < "3";
-                break;
+
+        // TikZ externalization: pass -output-directory into the child engine
+        // call when the user hasn't customized `system call` themselves.
+        if (shellEscape) {
+            std::ifstream in(texFile);
+            std::string source((std::istreambuf_iterator<char>(in)), { });
+            if ((source.contains("\\tikzexternalize") || source.contains("\\usetikzlibrary{external}"))
+                && !source.contains("system call")) {
+                std::string bin = engineProgram.empty()
+                    ? std::string(engineKindName(engineKind))
+                    : std::string(engineProgram);
+                preamble += "\\AtBeginDocument{\\ifdefined\\tikzset\\tikzset{external/system call={"
+                    + bin
+                    + " \\tikzexternalcheckshellescape -halt-on-error -interaction=batchmode"
+                      " -output-directory=\""
+                    + rel + "\" -jobname \"\\image\" \"\\texsource\"}}\\fi}";
             }
         }
-        if (!v2)
-            return { };
-        // Relative to the document directory (the engine's working
-        // directory): minted also uses it in shell commands, where an
-        // absolute path with spaces would break.
-        auto rel = fs::relative(outDir, texFile.parent_path()).generic_string();
-        return "\\PassOptionsToPackage{outputdir=" + rel + "}{minted}";
+        return preamble;
     }
 
-    BuildResult buildWith(const BuildOptions& options, EngineKind engineKind)
+    BuildResult buildWith(const BuildOptions& options, EngineKind engineKind,
+        bool suppressResetNotice = false)
     {
-        auto [engineArguments, jobName] = splitJobName(options.engineArguments);
+        auto [engineArguments, flagJobName] = splitJobName(options.engineArguments);
+        auto jobName = options.jobName ? options.jobName : flagJobName;
         auto engine = createEngine(engineKind, engineArguments);
 
         fs::path outDir = options.resolvedOutputDir();
@@ -300,9 +473,11 @@ namespace {
         Blake3Hasher hasher;
 
         std::vector<std::unique_ptr<ITool>> tools;
-        tools.reserve(options.tools.size());
+        tools.reserve(options.tools.size() + options.customTools.size());
         for (ToolKind kind : options.tools)
             tools.push_back(createTool(kind));
+        for (const auto& recipe : options.customTools)
+            tools.push_back(std::make_unique<HashTriggeredTool>(recipe));
 
         EngineInvocation inv {
             .texFile = options.texFile,
@@ -311,7 +486,9 @@ namespace {
             .haltOnError = options.haltOnError,
             .shellEscape = options.shellEscape,
             .synctex = options.synctex,
-            .preamble = mintedPreamble(options.texFile, outDir),
+            .preamble = buildPreambleHooks(options.texFile, outDir, engineKind,
+                engineArguments.program, options.shellEscape),
+            .extraEnv = resolvedEnv(options),
         };
 
         // Held until the build returns: a second maketex building this
@@ -333,22 +510,43 @@ namespace {
         for (auto& t : tools)
             toolPtrs.push_back(t.get());
 
-        BuildDriver driver(*engine, stateDb, hasher, inv,
-            BuildDriver::Config {
-                .maxPasses = options.maxPasses,
-                .tools = std::move(toolPtrs),
-                .ignorePrefixes = texSystemRoots(),
-                .observer = options.observer,
-                .processLimits = WaitLimits {
-                    .timeout = options.processTimeout,
-                    .stop = options.stopToken,
-                },
-            });
+        BuildDriver::Config driverConfig {
+            .maxPasses = options.maxPasses,
+            .tools = std::move(toolPtrs),
+            .ignorePrefixes = texSystemRoots(),
+            .observer = options.observer,
+            .processLimits = WaitLimits {
+                .timeout = options.processTimeout,
+                .stop = options.stopToken,
+            },
+            .diagnosticPolicy = options.diagnosticPolicy,
+        };
+        if (!options.contentFilters.empty()) {
+            // Merge user filters with built-in defaults for the same extension
+            // instead of overwriting them (e.g. keep \@writefile filtering on
+            // .aux when the user adds another .aux ignore pattern).
+            std::map<std::string, std::string> combined {
+                { "eps", R"(^%%CreationDate: )" },
+                { "aux", R"(^\\@writefile\{)" },
+            };
+            for (const auto& [ext, pattern] : options.contentFilters) {
+                auto it = combined.find(ext);
+                if (it == combined.end())
+                    combined.emplace(ext, pattern);
+                else
+                    it->second = "(" + it->second + ")|(" + pattern + ")";
+            }
+            driverConfig.contentFilters.clear();
+            for (const auto& [ext, pattern] : combined)
+                driverConfig.contentFilters.emplace_back(ext, std::regex { pattern });
+        }
+
+        BuildDriver driver(*engine, stateDb, hasher, inv, std::move(driverConfig));
         BuildResult result;
         static_cast<DriverResult&>(result) = driver.run();
         result.engine = engineKind;
 
-        if (stateDb.wasReset())
+        if (stateDb.wasReset() && !suppressResetNotice)
             result.diagnostics.insert(result.diagnostics.begin(),
                 Diagnostic {
                     .severity = Diagnostic::Severity::Info,
@@ -372,6 +570,8 @@ namespace {
 
 std::string jobNameFor(const BuildOptions& options)
 {
+    if (options.jobName && !options.jobName->empty())
+        return *options.jobName;
     return splitJobName(options.engineArguments).second.value_or(options.texFile.stem().string());
 }
 
@@ -399,6 +599,16 @@ EngineChoice chooseEngine(const BuildOptions& options)
 BuildResult runBuild(const BuildOptions& options)
 {
     auto choice = chooseEngine(options);
+    // If no engine was configured or statically detected, reuse a Unicode
+    // engine discovered by a previous retry so subsequent builds stay
+    // incremental instead of failing pdflatex and resetting the database.
+    if (!options.engine && choice.kind == EngineKind::PdfLaTeX && choice.reason.empty()) {
+        if (auto remembered = loadDetectedEngine(options)) {
+            choice.kind = *remembered;
+            choice.reason = "remembered from previous build";
+        }
+    }
+
     auto result = buildWith(options, choice.kind);
     result.engineReason = choice.reason;
 
@@ -408,9 +618,16 @@ BuildResult runBuild(const BuildOptions& options)
     bool guessed = !options.engine && choice.kind == EngineKind::PdfLaTeX;
     if (!result.success && guessed) {
         if (auto needed = unicodeEngineNeeded(result)) {
-            auto retried = buildWith(options, *needed);
+            // Drop any partial .aux left by the failed pdflatex pass so it
+            // cannot confuse the Unicode engine.
+            std::error_code ec;
+            fs::remove(options.resolvedOutputDir() / (jobNameFor(options) + ".aux"), ec);
+
+            auto retried = buildWith(options, *needed, /*suppressResetNotice=*/true);
             retried.engineReason = "pdflatex failed: the document needs a Unicode engine";
             retried.retriedEngine = true;
+            if (retried.success)
+                saveDetectedEngine(options, *needed);
             retried.diagnostics.insert(retried.diagnostics.begin(),
                 Diagnostic {
                     .severity = Diagnostic::Severity::Info,
@@ -495,14 +712,18 @@ std::vector<fs::path> publishArtifacts(const fs::path& outDir,
 
 std::optional<BuildFileSets> scanBuildFiles(const BuildOptions& options)
 {
+    auto flagJobName = splitJobName(options.engineArguments).second;
     EngineInvocation inv {
         .texFile = options.texFile,
         .outputDir = options.resolvedOutputDir(),
-        .jobName = splitJobName(options.engineArguments).second,
+        .jobName = options.jobName ? options.jobName : flagJobName,
+        .extraEnv = resolvedEnv(options),
     };
     fs::path flsPath = inv.jobFile(".fls");
+    auto systemRoots = texSystemRoots();
+    auto flsParser = projectFlsParser(options.texFile.parent_path(), systemRoots);
 
-    auto record = projectFlsParser(options.texFile.parent_path(), texSystemRoots()).parse(flsPath);
+    auto record = flsParser.parse(flsPath);
     if (!record)
         return std::nullopt;
 
@@ -511,10 +732,65 @@ std::optional<BuildFileSets> scanBuildFiles(const BuildOptions& options)
         outputPaths.insert(p.string());
 
     BuildFileSets sets;
+    std::unordered_set<std::string> seenSources;
     for (const auto& p : record->inputs) {
-        if (!outputPaths.contains(p.string()))
+        if (!outputPaths.contains(p.string()) && seenSources.insert(p.string()).second)
             sets.sources.push_back(p);
     }
+
+    // Auxiliary tools read files the TeX engine never opens (.bib databases,
+    // local .bst styles), so they are absent from the .fls. Include them as
+    // sources so `maketex watch` rebuilds when a bibliography is edited.
+    auto safeCanonical = [](const fs::path& p) {
+        std::error_code ec;
+        auto c = fs::weakly_canonical(p, ec);
+        return ec ? p.lexically_normal() : c;
+    };
+    auto isUnder = [](const fs::path& p, const fs::path& root) {
+        auto [a, b] = std::ranges::mismatch(root, p);
+        return a == root.end();
+    };
+    const fs::path outDirCanonical = safeCanonical(inv.outputDir);
+    std::vector<fs::path> systemRootsCanonical;
+    systemRootsCanonical.reserve(systemRoots.size());
+    for (const auto& r : systemRoots)
+        systemRootsCanonical.push_back(safeCanonical(r));
+
+    auto logFile = inv.jobFile(".log");
+    auto auxFile = inv.jobFile(".aux");
+    ToolContext ctx(
+        inv,
+        [logFile] { return LogParser { }.parse(logFile).value_or(LogRecord { }); },
+        [auxFile] {
+            std::error_code ec;
+            if (!fs::exists(auxFile, ec))
+                return AuxRecord { };
+            return AuxParser { }.parse(auxFile).value_or(AuxRecord { });
+        },
+        [record] { return *record; });
+
+    for (ToolKind kind : options.tools) {
+        auto tool = createTool(kind);
+        if (!tool->applies(ctx))
+            continue;
+        for (const auto& input : tool->inputs(ctx)) {
+            if (input.content.has_value())
+                continue;
+            std::error_code ec;
+            if (!fs::is_regular_file(input.path, ec))
+                continue;
+            auto canon = safeCanonical(input.path);
+            if (outputPaths.contains(canon.string()) || isUnder(canon, outDirCanonical))
+                continue;
+            bool inSystem = std::ranges::any_of(systemRootsCanonical,
+                [&](const fs::path& root) { return isUnder(canon, root); });
+            if (inSystem)
+                continue;
+            if (seenSources.insert(canon.string()).second)
+                sets.sources.push_back(std::move(canon));
+        }
+    }
+
     sets.generated = std::move(record->outputs);
     return sets;
 }

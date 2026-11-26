@@ -141,9 +141,11 @@ add_library(maketex STATIC
     src/engines/XeLatexEngine.cpp
     src/engines/LuaLatexEngine.cpp
     src/tools/BiberTool.cpp
+    src/tools/Bib2glsTool.cpp
     src/tools/BibtexTool.cpp
     src/tools/InputLocator.cpp
     src/tools/HashTriggeredTool.cpp
+    src/tools/MakeglossariesTool.cpp
     src/DiagnosticExtractor.cpp
     src/DiagnosticFormatter.cpp
     src/DocumentProbe.cpp

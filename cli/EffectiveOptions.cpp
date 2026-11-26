@@ -25,8 +25,8 @@ namespace {
             auto kind = parseToolKind(name);
             if (!kind)
                 return std::unexpected(std::format(
-                    "unknown tool: {} (expected biber, bibtex, makeindex, "
-                    "makeglossaries, or pythontex)",
+                    "unknown tool: {} (expected biber, bib2gls, bibtex, makeindex, "
+                    "nomencl, makeglossaries, or pythontex)",
                     name));
             kinds.push_back(*kind);
         }
@@ -115,6 +115,14 @@ std::expected<EffectiveOptions, std::string> assembleOptions(
         // was explicitly given must exist, though.
         return std::unexpected(texFile.error());
 
+    if (args.jobName) {
+        if (args.jobName->empty())
+            return std::unexpected("jobname must not be empty");
+        build.jobName = *args.jobName;
+    } else if (config && config->jobName) {
+        build.jobName = *config->jobName;
+    }
+
     if (args.engine) {
         auto kind = parseEngineKind(*args.engine);
         if (!kind)
@@ -179,9 +187,17 @@ std::expected<EffectiveOptions, std::string> assembleOptions(
     if (out.extras.watchIntervalMs <= 0)
         return std::unexpected("watch interval must be positive");
     if (config) {
+        build.customTools = config->customTools;
+        build.searchPaths = config->searchPaths;
+        build.extraEnv = config->extraEnv;
+        build.contentFilters = config->contentFilters;
+        build.diagnosticPolicy.failOn = config->failOn;
+        build.diagnosticPolicy.ignore = config->ignoreWarnings;
         out.extras.watchExtraPaths = config->watchExtraPaths;
         out.extras.cleanExtraExtensions = config->cleanExtraExtensions;
     }
+    merge(build.diagnosticPolicy.warningsAsErrors, args.warningsAsErrors,
+        config ? config->warningsAsErrors : std::nullopt);
     out.extras.cleanAll = args.cleanAll;
     out.extras.dryRun = args.dryRun;
     out.extras.noTui = args.noTui;
