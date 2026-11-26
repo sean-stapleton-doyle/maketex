@@ -15,16 +15,6 @@ A modern, zero-config C++ replacement for `latexmk`. Run `maketex` in a LaTeX pr
 
 </div>
 
-## Live watch mode
-
-`maketex watch` uses native OS file notifications (`kqueue` on macOS, `inotify` on Linux) to rebuild immediately on save and show live diagnostics in a full-screen TUI:
-
-<div align="center">
-
-![maketex watch TUI demo](docs/assets/watch.gif)
-
-</div>
-
 ## Quick start
 
 ```sh
@@ -35,6 +25,26 @@ maketex watch           # rebuild instantly on source or .bib edits (kqueue / in
 maketex doctor          # check your TeX engines, tools, and document packages
 maketex clean           # remove aux files (keep PDF); add --all for a pristine tree
 ```
+
+## Compiler-style diagnostics
+
+Instead of dumping hundreds of lines of raw TeX logs, `maketex` parses engine and auxiliary tool logs to point straight at the offending file, line, and source snippet:
+
+<div align="center">
+
+![maketex compiler-style diagnostics demo](docs/assets/diagnostics.gif)
+
+</div>
+
+## Live watch mode
+
+`maketex watch` uses native OS file notifications (`kqueue` on macOS, `inotify` on Linux) to rebuild immediately on save and show live diagnostics in a full-screen TUI:
+
+<div align="center">
+
+![maketex watch TUI demo](docs/assets/watch.gif)
+
+</div>
 
 ## Key features
 

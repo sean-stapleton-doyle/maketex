@@ -1,4 +1,4 @@
-# VHS tape for the main maketex CLI demo.
+# VHS tape for the main (all-green) maketex CLI demo.
 # Regenerate from the repo root with: vhs demo/demo.tape
 
 Output docs/assets/demo.gif
@@ -6,7 +6,7 @@ Output docs/assets/demo.gif
 Set Shell "bash"
 Set FontSize 16
 Set Width 920
-Set Height 500
+Set Height 460
 Set Padding 20
 Set Margin 16
 Set MarginFill "#0f111a"
@@ -48,15 +48,12 @@ Sleep 1.3s
 # 4. Content-hash cache makes unchanged rebuilds instant
 Type "maketex"
 Enter
-Sleep 1.3s
+Sleep 1.4s
 
-# 5. Clean compiler-style diagnostics with source snippets
-Type `sed -i '' 's/\\section/\\sectoin/' main.tex`
+# 5. Clean removes hidden aux files while keeping the published PDF
+Type "maketex clean"
 Enter
-Sleep 400ms
-Type "maketex"
-Enter
-Sleep 3.2s
+Sleep 2.2s
 
 Hide
 Type `rm -rf "$DEMO_DIR"`
