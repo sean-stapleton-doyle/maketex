@@ -1,8 +1,9 @@
 #include "render/InlineReport.h"
 
 #include "PathUtil.h"
-
 #include "render/SourceSnippet.h"
+
+#include "maketex/DiagnosticFormatter.h"
 
 #include <ftxui/dom/node.hpp>
 #include <ftxui/screen/screen.hpp>
@@ -18,10 +19,15 @@ using namespace ftxui;
 
 namespace maketex::cli {
 
+bool useStyledOutput(bool plainFlag, bool isTty, bool noColor)
+{
+    return !plainFlag && isTty && !noColor;
+}
+
 bool useStyledOutput(bool plainFlag)
 {
-    return !plainFlag && isatty(STDOUT_FILENO) == 1
-        && std::getenv("NO_COLOR") == nullptr;
+    return useStyledOutput(plainFlag, ::isatty(STDOUT_FILENO) == 1,
+        std::getenv("NO_COLOR") != nullptr);
 }
 
 namespace {
@@ -132,13 +138,58 @@ Element buildReport(const BuildResult& result, const BuildOptions& options,
     return vbox(std::move(rows));
 }
 
-void printInline(const ftxui::Element& doc)
+void printInline(const ftxui::Element& doc, std::ostream& out)
 {
     Element copy = doc;
     auto screen = Screen::Create(Dimension::Fit(copy));
     Render(screen, copy);
-    screen.Print();
-    std::cout << "\n";
+    out << screen.ToString() << "\n";
+}
+
+void printInline(const ftxui::Element& doc)
+{
+    printInline(doc, std::cout);
+}
+
+void printHumanReport(const BuildResult& result, const BuildOptions& options,
+    bool verbose, bool styled, std::ostream& out, std::ostream& err)
+{
+    if (styled) {
+        printInline(buildReport(result, options, verbose), out);
+        return;
+    }
+
+    // One diagnostic at a time so the source snippet (CLI-layer file I/O the
+    // library formatter deliberately avoids) lands under its diagnostic, not
+    // after the whole list.
+    for (const auto& diagnostic : result.diagnostics) {
+        // The hint goes last, under the quoted source line.
+        auto withoutHint = diagnostic;
+        withoutHint.hint.clear();
+        diagnostics::format({ withoutHint }, err,
+            verbose ? diagnostics::Verbosity::Verbose
+                    : diagnostics::Verbosity::Normal);
+        if (auto snippet = readSourceLine(diagnostic.sourcePath, diagnostic.line))
+            err << std::format("  {:>4} | {}\n", diagnostic.line, *snippet);
+        if (!diagnostic.hint.empty())
+            err << "  hint: " << diagnostic.hint << "\n";
+    }
+    // Why the build took the passes it did — "pass 2: main.aux changed".
+    if (verbose)
+        for (const auto& reason : result.rerunReasons)
+            err << "maketex: " << reason << "\n";
+    if (!result.engineReason.empty())
+        err << "maketex: engine " << engineLabel(result.engine, result.engineReason) << "\n";
+    std::string passes = passCount(result.passes);
+    if (result.upToDate)
+        out << "maketex: up to date\n";
+    else if (result.success && result.passes == 0)
+        out << "maketex: done (tools only, no engine pass needed)\n";
+    else if (result.success)
+        out << "maketex: done in " << passes << "\n";
+    else
+        err << "maketex: failed after " << passes << ": "
+            << result.lastError << "\n";
 }
 
 } // namespace maketex::cli

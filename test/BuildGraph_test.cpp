@@ -77,3 +77,26 @@ TEST_F(BuildGraphTest, findRule_returnsExistingNode)
     auto& added = m_graph.getOrAddRule("bibtex");
     EXPECT_EQ(m_graph.findRule("bibtex"), &added);
 }
+
+TEST_F(BuildGraphTest, constOverloadsFindAndListNodes)
+{
+    const BuildGraph& emptyConst = m_graph;
+    EXPECT_EQ(emptyConst.findFile(m_dir / "main.tex"), nullptr);
+    EXPECT_EQ(emptyConst.findRule("latex"), nullptr);
+    EXPECT_TRUE(emptyConst.files().empty());
+
+    auto& file = m_graph.getOrAddFile(m_dir / "main.tex", FileRole::Source);
+    auto& aux = m_graph.getOrAddFile(m_dir / "main.aux", FileRole::Generated);
+    auto& rule = m_graph.getOrAddRule("latex");
+
+    const BuildGraph& constGraph = m_graph;
+    EXPECT_EQ(constGraph.findFile(m_dir / "sub" / ".." / "main.tex"), &file);
+    EXPECT_EQ(constGraph.findFile(m_dir / "missing.tex"), nullptr);
+    EXPECT_EQ(constGraph.findRule("latex"), &rule);
+    EXPECT_EQ(constGraph.findRule("missing"), nullptr);
+
+    auto allFiles = constGraph.files();
+    ASSERT_EQ(allFiles.size(), 2u);
+    EXPECT_TRUE((allFiles[0] == &file && allFiles[1] == &aux)
+        || (allFiles[0] == &aux && allFiles[1] == &file));
+}
