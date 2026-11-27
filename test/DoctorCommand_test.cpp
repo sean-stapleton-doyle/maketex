@@ -198,7 +198,7 @@ TEST(DoctorCommandTest, flagsMissingRequiredEngineToolAndPackagesForDocument)
     env.packageMap["missingpkg.sty"] = "missingpkg";
 
     EffectiveOptions opts;
-    opts.build.texFile = "/tmp/thesis.tex";
+    opts.build.texFile = "/project/thesis.tex";
 
     int code = runDoctorCommand(opts, env);
 
@@ -226,7 +226,7 @@ TEST(DoctorCommandTest, warnsAboutShellEscapeAndHandlesSingularPluralPackages)
         env.texFiles = { "article.cls", "minted.sty" };
 
         EffectiveOptions opts;
-        opts.build.texFile = "/tmp/code.tex";
+        opts.build.texFile = "/project/code.tex";
         opts.build.engine = EngineKind::PdfLaTeX;
 
         EXPECT_EQ(runDoctorCommand(opts, env), kExitSuccess);
@@ -245,7 +245,7 @@ TEST(DoctorCommandTest, warnsAboutShellEscapeAndHandlesSingularPluralPackages)
         env.texFiles = { "amsmath.sty", "graphicx.sty" };
 
         EffectiveOptions opts;
-        opts.build.texFile = "/tmp/frag.tex";
+        opts.build.texFile = "/project/frag.tex";
         opts.build.shellEscape = true;
 
         EXPECT_EQ(runDoctorCommand(opts, env), kExitSuccess);
@@ -258,7 +258,7 @@ TEST(DoctorCommandTest, warnsAboutShellEscapeAndHandlesSingularPluralPackages)
 TEST(DoctorCommandTest, installMissingInstallsWhenAvailableAndSkipsWhenUnavailable)
 {
     EffectiveOptions opts;
-    opts.build.texFile = "/tmp/paper.tex";
+    opts.build.texFile = "/project/paper.tex";
     opts.extras.installMissingRequested = true;
 
     // Direct access: installs missing package before final check → exit 0.
