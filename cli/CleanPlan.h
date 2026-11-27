@@ -36,4 +36,16 @@ CleanPlan computeCleanPlan(const std::optional<BuildFileSets>& fileSets,
     const std::vector<std::filesystem::path>& publishedArtifacts = { },
     bool userDirectory = false);
 
+// Merges `extra` into `target`, preserving order and dropping duplicate
+// removal paths (e.g. when sweeping a legacy pre-.maketex layout).
+void mergePlans(CleanPlan& target, const CleanPlan& extra);
+
+// When `dbPath` is scheduled for removal but other jobs still have state in
+// it, removes `dbPath` from `plan.remove` and returns true (the caller should
+// forget `jobName` in place instead of deleting the database).
+bool preserveSharedDatabase(CleanPlan& plan,
+    const std::filesystem::path& dbPath,
+    const std::string& jobName,
+    const std::vector<std::string>& recordedJobs);
+
 } // namespace maketex::cli
