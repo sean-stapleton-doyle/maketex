@@ -82,10 +82,11 @@ coverage: ## Build with coverage, run tests, and write SonarQube coverage.xml (r
 	cmake --build "$(COVERAGE_BUILD_DIR)" -j "$(JOBS)"
 	ctest --test-dir "$(COVERAGE_BUILD_DIR)" --output-on-failure -j "$(JOBS)"
 	@GCOV_BIN="$$(command -v gcov-14 >/dev/null 2>&1 && echo gcov-14 || (xcrun -f llvm-cov >/dev/null 2>&1 && echo 'xcrun llvm-cov gcov' || echo gcov))"; \
-	gcovr --root . --object-directory "$(COVERAGE_BUILD_DIR)" \
+	gcovr --root . \
 	  --filter 'src/' --filter 'include/' --filter 'cli/' \
 	  --gcov-executable "$$GCOV_BIN" \
-	  --sonarqube coverage.xml --print-summary
+	  --sonarqube coverage.xml --print-summary \
+	  "$(COVERAGE_BUILD_DIR)"
 
 format: ## Format all C++ sources with clang-format
 	@$(CPP_FILES) | xargs -0 clang-format -i

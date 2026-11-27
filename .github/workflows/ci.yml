@@ -31,27 +31,31 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends \
-            g++-14 ninja-build ccache pipx gcovr \
+            g++-14 ninja-build ccache pipx \
             texlive-latex-base texlive-latex-recommended texlive-latex-extra \
             texlive-bibtex-extra biber texlive-xetex texlive-luatex \
             texlive-pictures texlive-science texlive-extra-utils \
             texlive-fonts-recommended lmodern fonts-lmodern \
             python3-pygments python-is-python3 ghostscript texlive-font-utils
 
-      - name: Cache pipx tools (cmake)
+      - name: Cache pipx tools (cmake, gcovr)
         uses: actions/cache@v6
         with:
           path: |
             ~/.local/share/pipx
             ~/.local/bin
-          key: pipx-cmake-${{ runner.os }}-${{ runner.arch }}-v1
+          key: pipx-tools-${{ runner.os }}-${{ runner.arch }}-v1
 
       # Ubuntu 24.04's CMake (3.28) can't request C++26 from GCC 14 and
       # would silently build as C++17; CMakeLists.txt refuses it.
-      - name: Install CMake
+      # Ubuntu 24.04's gcovr (7.0) predates GCC 14's gcov format.
+      - name: Install CMake and gcovr
         run: |
           if [ ! -x "$HOME/.local/bin/cmake" ]; then
             pipx install cmake
+          fi
+          if [ ! -x "$HOME/.local/bin/gcovr" ]; then
+            pipx install gcovr
           fi
           echo "$HOME/.local/bin" >> "$GITHUB_PATH"
 
@@ -71,12 +75,16 @@ jobs:
           restore-keys: |
             ccache-ci-${{ runner.os }}-${{ runner.arch }}-debug-cov-
 
+      # Set both C and C++ to GCC 14: leaving C on Ubuntu's default gcc-13 makes
+      # CMake inject -L/usr/lib/gcc/x86_64-linux-gnu/13 ahead of GCC 14's libdir,
+      # linking GCC 13's libgcov.a which silently rejects GCC 14 coverage objects.
       - name: Configure
         env:
           CPM_SOURCE_CACHE: ~/.cache/CPM
         run: >
           cmake -S . -B build -G Ninja
           -DCMAKE_BUILD_TYPE=Debug
+          -DCMAKE_C_COMPILER=gcc-14
           -DCMAKE_CXX_COMPILER=g++-14
           -DMAKETEX_COVERAGE=ON
           -DCMAKE_C_COMPILER_LAUNCHER=ccache
@@ -102,11 +110,17 @@ jobs:
 
       - name: Generate coverage report (gcovr)
         run: |
-          gcovr --root . --object-directory build \
+          gcno_count=$(find build -name '*.gcno' | wc -l)
+          gcda_count=$(find build -name '*.gcda' | wc -l)
+          echo "Found ${gcno_count} .gcno files and ${gcda_count} .gcda files"
+          test "${gcda_count}" -gt 0
+          gcovr --version
+          gcovr --root . \
             --filter 'src/' --filter 'include/' --filter 'cli/' \
             --gcov-executable gcov-14 \
             --sonarqube coverage.xml \
-            --print-summary
+            --print-summary \
+            build
 
       - name: Check SonarQube token
         id: sonar_check
