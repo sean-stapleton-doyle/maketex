@@ -2,17 +2,12 @@
 
 #include "PackageHints.h"
 #include "PackageInstaller.h"
-#include "PathUtil.h"
 #include "render/GithubReport.h"
 #include "render/InlineReport.h"
 #include "render/JsonReport.h"
-#include "render/SourceSnippet.h"
-
-#include <format>
-
-#include "maketex/DiagnosticFormatter.h"
 
 #include <algorithm>
+#include <cstdlib>
 #include <exception>
 #include <iostream>
 
@@ -22,52 +17,45 @@ namespace maketex::cli {
 
 namespace {
 
-    void printHumanReport(const BuildResult& result,
-        const EffectiveOptions& options)
-    {
-        if (useStyledOutput(options.extras.plain)) {
-            printInline(buildReport(result, options.build, options.extras.verbose));
-            return;
+    class SystemBuildEnv final : public IBuildEnv {
+    public:
+        BuildResult runBuild(const BuildOptions& options) override
+        {
+            return maketex::runBuild(options);
         }
 
-        // One diagnostic at a time so the source snippet (CLI-layer file
-        // I/O the library formatter deliberately avoids) lands under its
-        // diagnostic, not after the whole list.
-        for (const auto& diagnostic : result.diagnostics) {
-            // The hint goes last, under the quoted source line.
-            auto withoutHint = diagnostic;
-            withoutHint.hint.clear();
-            diagnostics::format({ withoutHint }, std::cerr,
-                options.extras.verbose ? diagnostics::Verbosity::Verbose
-                                       : diagnostics::Verbosity::Normal);
-            if (auto snippet
-                = readSourceLine(diagnostic.sourcePath, diagnostic.line))
-                std::cerr << std::format("  {:>4} | {}\n", diagnostic.line,
-                    *snippet);
-            if (!diagnostic.hint.empty())
-                std::cerr << "  hint: " << diagnostic.hint << "\n";
+        BuildResult buildInstallingMissing(const BuildOptions& options,
+            const InstallPolicy& policy, std::ostream& log) override
+        {
+            return maketex::cli::buildInstallingMissing(options, policy, log);
         }
-        // Why the build took the passes it did — "pass 2: main.aux changed".
-        if (options.extras.verbose)
-            for (const auto& reason : result.rerunReasons)
-                std::cerr << "maketex: " << reason << "\n";
-        if (!result.engineReason.empty())
-            std::cerr << "maketex: engine " << engineLabel(result.engine, result.engineReason) << "\n";
-        std::string passes = passCount(result.passes);
-        if (result.upToDate)
-            std::cout << "maketex: up to date\n";
-        else if (result.success && result.passes == 0)
-            std::cout << "maketex: done (tools only, no engine pass needed)\n";
-        else if (result.success)
-            std::cout << "maketex: done in " << passes << "\n";
-        else
-            std::cerr << "maketex: failed after " << passes << ": "
-                      << result.lastError << "\n";
-    }
+
+        void addInstallHints(std::vector<Diagnostic>& diagnostics) override
+        {
+            maketex::cli::addInstallHints(diagnostics);
+        }
+
+        bool confirm(const std::string& question) override
+        {
+            return askOnTerminal(question);
+        }
+
+        bool isStdoutTty() const override { return ::isatty(STDOUT_FILENO) == 1; }
+
+        bool isInteractiveTty() const override
+        {
+            return ::isatty(STDIN_FILENO) == 1 && ::isatty(STDERR_FILENO) == 1;
+        }
+
+        bool hasNoColor() const override { return std::getenv("NO_COLOR") != nullptr; }
+
+        std::ostream& out() override { return std::cout; }
+        std::ostream& err() override { return std::cerr; }
+    };
 
 } // namespace
 
-int runBuildCommand(const EffectiveOptions& options)
+int runBuildCommand(const EffectiveOptions& options, IBuildEnv& env)
 {
     BuildResult result;
     bool environmentError = false;
@@ -77,13 +65,13 @@ int runBuildCommand(const EffectiveOptions& options)
             // with human output (machine formats own stdout).
             InstallPolicy policy {
                 .interactive = options.extras.format == OutputFormat::Human
-                    && ::isatty(STDIN_FILENO) && ::isatty(STDERR_FILENO),
+                    && env.isInteractiveTty(),
                 .requested = options.extras.installMissingRequested,
-                .confirm = askOnTerminal,
+                .confirm = [&env](const std::string& q) { return env.confirm(q); },
             };
-            result = buildInstallingMissing(options.build, policy, std::cerr);
+            result = env.buildInstallingMissing(options.build, policy, env.err());
         } else {
-            result = runBuild(options.build);
+            result = env.runBuild(options.build);
         }
     } catch (const std::exception& e) {
         // Database or filesystem trouble: still one report in the requested
@@ -96,7 +84,7 @@ int runBuildCommand(const EffectiveOptions& options)
             .category = "environment",
         });
     }
-    addInstallHints(result.diagnostics);
+    env.addInstallHints(result.diagnostics);
     environmentError = environmentError
         || std::ranges::any_of(result.diagnostics,
             [](const Diagnostic& d) { return d.category == "missing-tool"; });
@@ -105,19 +93,29 @@ int runBuildCommand(const EffectiveOptions& options)
     case OutputFormat::Json:
         // stdout carries exactly one JSON document; anything else (config
         // warnings, reset notices) belongs on stderr.
-        printJsonReport(result, options.build, std::cout);
+        printJsonReport(result, options.build, env.out());
         break;
     case OutputFormat::Github:
-        printGithubReport(result, std::cout);
+        printGithubReport(result, env.out());
         break;
-    case OutputFormat::Human:
-        printHumanReport(result, options);
+    case OutputFormat::Human: {
+        bool styled = useStyledOutput(options.extras.plain,
+            env.isStdoutTty(), env.hasNoColor());
+        printHumanReport(result, options.build, options.extras.verbose,
+            styled, env.out(), env.err());
         break;
+    }
     }
 
     if (result.success)
         return kExitSuccess;
     return environmentError ? kExitEnvironment : kExitBuildFailed;
+}
+
+int runBuildCommand(const EffectiveOptions& options)
+{
+    SystemBuildEnv env;
+    return runBuildCommand(options, env);
 }
 
 } // namespace maketex::cli
