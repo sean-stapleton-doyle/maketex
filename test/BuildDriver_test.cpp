@@ -477,7 +477,7 @@ TEST_F(BuildDriverTest, secondInvocationFastPathAvoidsRehashing)
     } });
     BuildDriver firstDriver(firstEngine, m_db, hasher, makeInv());
     ASSERT_TRUE(firstDriver.run().success);
-    int callsAfterFirstBuild = hasher.callCount;
+    int callsAfterFirstBuild = hasher.callCount();
     ASSERT_GT(callsAfterFirstBuild, 0);
 
     FakeEngine secondEngine({ });
@@ -486,7 +486,7 @@ TEST_F(BuildDriverTest, secondInvocationFastPathAvoidsRehashing)
 
     EXPECT_TRUE(res.success);
     EXPECT_EQ(res.passes, 0);
-    EXPECT_EQ(hasher.callCount, callsAfterFirstBuild);
+    EXPECT_EQ(hasher.callCount(), callsAfterFirstBuild);
 }
 
 TEST_F(BuildDriverTest, ignoredPrefixFilesAreNotTracked)

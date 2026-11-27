@@ -60,7 +60,7 @@ TEST_F(FileStateTrackerTest, absentFileReturnsAbsentState)
 
     ASSERT_TRUE(snap.has_value());
     EXPECT_FALSE(snap.value().exists);
-    EXPECT_EQ(m_hasher.callCount, 0);
+    EXPECT_EQ(m_hasher.callCount(), 0);
 }
 
 TEST_F(FileStateTrackerTest, presentFileWithNoStoredState_callsHasher)
@@ -73,7 +73,7 @@ TEST_F(FileStateTrackerTest, presentFileWithNoStoredState_callsHasher)
     ASSERT_TRUE(snap.has_value());
     EXPECT_TRUE(snap.value().exists);
     EXPECT_EQ(snap.value().path, p.string());
-    EXPECT_EQ(m_hasher.callCount, 1);
+    EXPECT_EQ(m_hasher.callCount(), 1);
 }
 
 TEST_F(FileStateTrackerTest, fastPath_skipsHasher_whenMtimeAndSizeMatch)
@@ -98,7 +98,7 @@ TEST_F(FileStateTrackerTest, fastPath_skipsHasher_whenMtimeAndSizeMatch)
     auto snap = tracker.snapshot(p);
 
     ASSERT_TRUE(snap.has_value());
-    EXPECT_EQ(m_hasher.callCount, 0);
+    EXPECT_EQ(m_hasher.callCount(), 0);
     EXPECT_EQ(snap.value().hash, storedHash);
 }
 
@@ -119,7 +119,7 @@ TEST_F(FileStateTrackerTest, coldPath_callsHasher_whenMtimeDiffers)
     FileStateTracker tracker(m_db, m_hasher);
     ASSERT_TRUE(tracker.snapshot(p).has_value());
 
-    EXPECT_EQ(m_hasher.callCount, 1);
+    EXPECT_EQ(m_hasher.callCount(), 1);
 }
 
 TEST_F(FileStateTrackerTest, coldPath_callsHasher_whenStoredIsAbsent)
@@ -130,7 +130,7 @@ TEST_F(FileStateTrackerTest, coldPath_callsHasher_whenStoredIsAbsent)
     FileStateTracker tracker(m_db, m_hasher);
     ASSERT_TRUE(tracker.snapshot(p).has_value());
 
-    EXPECT_EQ(m_hasher.callCount, 1);
+    EXPECT_EQ(m_hasher.callCount(), 1);
 }
 
 TEST_F(FileStateTrackerTest, ignorePatternPassedToHasher)
@@ -166,9 +166,9 @@ TEST_F(FileStateTrackerTest, recentlyModifiedFileIsNotTrustedByTheFastPath)
     m_db.upsertFileState(*first);
 
     write("fresh.bbl", "out v2\n"); // same size, likely the same mtime tick
-    int before = m_hasher.callCount;
+    int before = m_hasher.callCount();
     ASSERT_TRUE(tracker.snapshot(p).has_value());
-    EXPECT_EQ(m_hasher.callCount, before + 1) << "stale hash reused for new content";
+    EXPECT_EQ(m_hasher.callCount(), before + 1) << "stale hash reused for new content";
 }
 
 TEST_F(FileStateTrackerTest, settledFileKeepsItsMtime)
