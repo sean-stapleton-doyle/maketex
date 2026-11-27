@@ -113,4 +113,28 @@ CleanPlan computeCleanPlan(const std::optional<BuildFileSets>& fileSets,
     return plan;
 }
 
+void mergePlans(CleanPlan& target, const CleanPlan& extra)
+{
+    std::set<fs::path> seen(target.remove.begin(), target.remove.end());
+    for (const auto& p : extra.remove)
+        if (seen.insert(p).second)
+            target.remove.push_back(p);
+    target.skippedOutside.insert(target.skippedOutside.end(),
+        extra.skippedOutside.begin(), extra.skippedOutside.end());
+}
+
+bool preserveSharedDatabase(CleanPlan& plan, const fs::path& dbPath,
+    const std::string& jobName, const std::vector<std::string>& recordedJobs)
+{
+    auto it = std::ranges::find(plan.remove, dbPath);
+    if (it == plan.remove.end())
+        return false;
+    bool hasOtherJobs = std::ranges::any_of(recordedJobs,
+        [&](const std::string& job) { return job != jobName; });
+    if (!hasOtherJobs)
+        return false;
+    plan.remove.erase(it);
+    return true;
+}
+
 } // namespace maketex::cli
