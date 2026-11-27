@@ -97,7 +97,7 @@ public:
 EffectiveOptions baseOptions()
 {
     EffectiveOptions opts;
-    opts.build.texFile = "/tmp/paper.tex";
+    opts.build.texFile = "/project/paper.tex";
     opts.extras.installMissing = false;
     opts.extras.format = OutputFormat::Human;
     return opts;

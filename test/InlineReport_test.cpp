@@ -187,7 +187,7 @@ TEST(InlineReport, buildReportCoversToolsOnlyDiagnosticsAndVerboseRerunReasons)
         .rerunReasons = { "pass 2: main.aux changed" },
         .diagnostics = { Diagnostic { .severity = Diagnostic::Severity::Warning, .message = "cite missing" } },
     });
-    BuildOptions options { .texFile = "/tmp/paper.tex" };
+    BuildOptions options { .texFile = "/project/paper.tex" };
 
     auto rendered = renderToString(buildReport(result, options, /*verbose=*/true));
     EXPECT_NE(rendered.find("tools only, no engine pass needed"), std::string::npos);
@@ -198,7 +198,7 @@ TEST(InlineReport, buildReportCoversToolsOnlyDiagnosticsAndVerboseRerunReasons)
 TEST(InlineReport, printInlineWritesRenderedDocumentToStream)
 {
     auto result = fromDriver(DriverResult { .success = true, .passes = 1 });
-    BuildOptions options { .texFile = "/tmp/doc.tex" };
+    BuildOptions options { .texFile = "/project/doc.tex" };
     std::ostringstream oss;
 
     printInline(buildReport(result, options, false), oss);
