@@ -66,6 +66,8 @@ endif()
 # never for dependencies.
 set(MAKETEX_SANITIZE "" CACHE STRING
     "Sanitizers for maketex's own targets, e.g. address,undefined (GCC/Clang)")
+option(MAKETEX_COVERAGE
+    "Enable code coverage instrumentation on maketex targets (GCC/Clang)" OFF)
 add_library(maketex_build_settings INTERFACE)
 if(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
     target_compile_options(maketex_build_settings INTERFACE
@@ -82,6 +84,10 @@ if(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
             -fsanitize=${MAKETEX_SANITIZE} -fno-omit-frame-pointer)
         target_link_options(maketex_build_settings INTERFACE
             -fsanitize=${MAKETEX_SANITIZE})
+    endif()
+    if(MAKETEX_COVERAGE)
+        target_compile_options(maketex_build_settings INTERFACE --coverage -O0)
+        target_link_options(maketex_build_settings INTERFACE --coverage)
     endif()
 endif()
 

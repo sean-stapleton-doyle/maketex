@@ -24,12 +24,14 @@ jobs:
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
 
       - name: Install toolchain and TeX Live
         run: |
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends \
-            g++-14 ninja-build ccache pipx \
+            g++-14 ninja-build ccache pipx gcovr \
             texlive-latex-base texlive-latex-recommended texlive-latex-extra \
             texlive-bibtex-extra biber texlive-xetex texlive-luatex \
             texlive-pictures texlive-science texlive-extra-utils \
@@ -65,9 +67,9 @@ jobs:
         uses: actions/cache@v6
         with:
           path: ~/.cache/ccache
-          key: ccache-ci-${{ runner.os }}-${{ runner.arch }}-debug-${{ github.sha }}
+          key: ccache-ci-${{ runner.os }}-${{ runner.arch }}-debug-cov-${{ github.sha }}
           restore-keys: |
-            ccache-ci-${{ runner.os }}-${{ runner.arch }}-debug-
+            ccache-ci-${{ runner.os }}-${{ runner.arch }}-debug-cov-
 
       - name: Configure
         env:
@@ -76,6 +78,7 @@ jobs:
           cmake -S . -B build -G Ninja
           -DCMAKE_BUILD_TYPE=Debug
           -DCMAKE_CXX_COMPILER=g++-14
+          -DMAKETEX_COVERAGE=ON
           -DCMAKE_C_COMPILER_LAUNCHER=ccache
           -DCMAKE_CXX_COMPILER_LAUNCHER=ccache
 
@@ -96,6 +99,26 @@ jobs:
 
       - name: End-to-end tests (the maketex binary)
         run: ctest --test-dir build --label-regex e2e --output-on-failure -j 4
+
+      - name: Generate coverage report (gcovr)
+        run: |
+          gcovr --root . --object-directory build \
+            --filter 'src/' --filter 'include/' --filter 'cli/' \
+            --gcov-executable gcov-14 \
+            --sonarqube coverage.xml \
+            --print-summary
+
+      - name: Check SonarQube token
+        id: sonar_check
+        env:
+          HAS_TOKEN: ${{ secrets.SONAR_TOKEN != '' }}
+        run: echo "enabled=${HAS_TOKEN}" >> "$GITHUB_OUTPUT"
+
+      - name: SonarQube Cloud Scan
+        if: steps.sonar_check.outputs.enabled == 'true'
+        uses: SonarSource/sonarqube-scan-action@70bad232163b09d998ea0707ee80c0ec80798c16 # v8.5.1
+        env:
+          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
 
   # Unit tests on the primary development platform.
   macos:
