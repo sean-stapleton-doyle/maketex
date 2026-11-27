@@ -15,6 +15,7 @@ add_library(maketex_cli_core STATIC
     render/SourceSnippet.cpp
     commands/BuildCommand.cpp
     commands/WatchCommand.cpp
+    commands/WatchSession.cpp
     commands/CleanCommand.cpp
 )
 

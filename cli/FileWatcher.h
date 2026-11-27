@@ -12,35 +12,34 @@
 
 namespace maketex::cli {
 
-// Watches a fixed set of files for mtime/size/existence changes using native
-// OS file notifications (kqueue on macOS, inotify on Linux) with a periodic
-// stat fallback so save-to-rebuild latency is near-instant while remaining
-// reliable on network filesystems or large watch sets.
-class FileWatcher {
+struct FileWatcherEntry {
+    std::filesystem::path path;
+    std::int64_t mtimeNs = 0;
+    std::uintmax_t size = 0;
+    bool exists = false;
+
+    bool operator==(const FileWatcherEntry&) const = default;
+};
+
+// Minimal abstract interface for file watching so watch-loop orchestration can
+// be driven deterministically by scripted fakes in unit tests.
+class IFileWatcher {
 public:
-    struct Entry {
-        std::filesystem::path path;
-        std::int64_t mtimeNs = 0;
-        std::uintmax_t size = 0;
-        bool exists = false;
-
-        bool operator==(const Entry&) const = default;
-    };
-
-    explicit FileWatcher(std::chrono::milliseconds pollInterval,
-        std::chrono::milliseconds quietPeriod = std::chrono::milliseconds(80));
-
+    using Entry = FileWatcherEntry;
     // Paths for which this returns true are never watched — applied after
     // directories are expanded, so a watched directory cannot smuggle in
     // the build's own outputs.
     using Exclusion = std::function<bool(const std::filesystem::path&)>;
 
+    virtual ~IFileWatcher() = default;
+
     // Replaces the watched paths. Directories contribute their regular files
     // (non-recursive) at poll time, so newly created files are seen.
-    void setWatchSet(std::vector<std::filesystem::path> paths, Exclusion exclude = { });
+    virtual void setWatchSet(std::vector<std::filesystem::path> paths,
+        Exclusion exclude = { }) = 0;
 
     // The current state of the watch set, to pass to waitForChange later.
-    std::vector<Entry> captureBaseline() const;
+    virtual std::vector<Entry> captureBaseline() const = 0;
 
     // Blocks until at least one watched file changes, then keeps polling
     // until a quiet period passes so editor save sequences coalesce; returns
@@ -50,11 +49,34 @@ public:
     // Changes are measured against `since` when given — a baseline captured
     // before a build, so a save made while it ran still counts. Paths not in
     // `since` (discovered by that build) start from their current state.
-    std::vector<std::filesystem::path> waitForChange(std::stop_token stopToken,
-        const std::optional<std::vector<Entry>>& since = std::nullopt);
+    virtual std::vector<std::filesystem::path> waitForChange(std::stop_token stopToken,
+        const std::optional<std::vector<Entry>>& since = std::nullopt) = 0;
 
     // Wakes a pending waitForChange immediately (forced rebuild).
-    void nudge();
+    virtual void nudge() = 0;
+};
+
+// Watches a fixed set of files for mtime/size/existence changes using native
+// OS file notifications (kqueue on macOS, inotify on Linux) with a periodic
+// stat fallback so save-to-rebuild latency is near-instant while remaining
+// reliable on network filesystems or large watch sets.
+class FileWatcher : public IFileWatcher {
+public:
+    using Entry = FileWatcherEntry;
+    using Exclusion = IFileWatcher::Exclusion;
+
+    explicit FileWatcher(std::chrono::milliseconds pollInterval,
+        std::chrono::milliseconds quietPeriod = std::chrono::milliseconds(80));
+
+    void setWatchSet(std::vector<std::filesystem::path> paths,
+        Exclusion exclude = { }) override;
+
+    std::vector<Entry> captureBaseline() const override;
+
+    std::vector<std::filesystem::path> waitForChange(std::stop_token stopToken,
+        const std::optional<std::vector<Entry>>& since = std::nullopt) override;
+
+    void nudge() override;
 
     static std::vector<Entry> snapshot(
         const std::vector<std::filesystem::path>& files);
