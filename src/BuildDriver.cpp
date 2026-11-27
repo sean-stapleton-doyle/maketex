@@ -16,8 +16,8 @@
 #include <algorithm>
 #include <ctime>
 #include <format>
-#include <future>
 #include <iterator>
+#include <thread>
 #include <unordered_set>
 
 namespace maketex {
@@ -482,18 +482,21 @@ BuildDriver::ToolPassOutcome BuildDriver::runStaleTools(
                 notify({ .kind = BuildEvent::Kind::ToolStarted,
                     .toolName = std::string(pending[idx].tool->name()) });
 
-            std::vector<std::future<RunResult<ToolInvocation>>> futures;
-            futures.reserve(wave.size());
-            for (size_t idx : wave) {
-                futures.push_back(std::async(std::launch::async,
-                    [&, idx] {
+            std::vector<std::optional<RunResult<ToolInvocation>>> waveResults(wave.size());
+            {
+                std::vector<std::jthread> workers;
+                workers.reserve(wave.size());
+                for (size_t i = 0; i < wave.size(); ++i) {
+                    const size_t idx = wave[i];
+                    workers.emplace_back([&, i, idx] {
                         const auto& p = pending[idx];
-                        return launchProcess(p.args, p.inv.workingDir, p.tool->invokerKind(),
-                            p.inv, toolEnv, m_processLimits);
-                    }));
+                        waveResults[i] = launchProcess(p.args, p.inv.workingDir,
+                            p.tool->invokerKind(), p.inv, toolEnv, m_processLimits);
+                    });
+                }
             }
             for (size_t i = 0; i < wave.size(); ++i) {
-                results.push_back(futures[i].get());
+                results.push_back(std::move(*waveResults[i]));
                 notify({ .kind = BuildEvent::Kind::ToolFinished,
                     .toolName = std::string(pending[wave[i]].tool->name()),
                     .success = results.back().success() });

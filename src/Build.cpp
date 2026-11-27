@@ -37,6 +37,10 @@
 
 namespace fs = std::filesystem;
 
+#ifndef MAKETEX_VERSION
+#define MAKETEX_VERSION "0.0.0-unknown"
+#endif
+
 namespace maketex {
 
 std::string_view version()
