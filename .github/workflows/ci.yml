@@ -118,6 +118,8 @@ jobs:
           gcovr --root . \
             --filter 'src/' --filter 'include/' --filter 'cli/' \
             --gcov-executable gcov-14 \
+            --exclude-throw-branches \
+            --exclude-unreachable-branches \
             --sonarqube coverage.xml \
             --print-summary \
             build

@@ -85,6 +85,8 @@ coverage: ## Build with coverage, run tests, and write SonarQube coverage.xml (r
 	gcovr --root . \
 	  --filter 'src/' --filter 'include/' --filter 'cli/' \
 	  --gcov-executable "$$GCOV_BIN" \
+	  --exclude-throw-branches \
+	  --exclude-unreachable-branches \
 	  --sonarqube coverage.xml --print-summary \
 	  "$(COVERAGE_BUILD_DIR)"
 
