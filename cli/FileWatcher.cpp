@@ -304,9 +304,15 @@ void FileWatcher::wakeNativeLocked() noexcept
 bool FileWatcher::sleepFor(std::chrono::milliseconds duration,
     std::stop_token& stopToken)
 {
+    std::stop_callback onStop(stopToken, [this] {
+        {
+            std::lock_guard lock(m_mutex);
+        }
+        m_wake.notify_all();
+    });
     std::unique_lock lock(m_mutex);
-    bool woken = m_wake.wait_for(lock, stopToken, duration,
-        [this] { return m_nudged; });
+    bool woken = m_wake.wait_for(lock, duration,
+        [&] { return m_nudged || stopToken.stop_requested(); });
     if (m_nudged) {
         m_nudged = false;
         return false;

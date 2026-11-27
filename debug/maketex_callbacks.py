@@ -108,10 +108,8 @@ def on_graph_new_file(frame, bp_loc, dict):
 
     # Skip noisy TeX system files
     skip_prefixes = ("/usr/local/texlive", "/Library/TeX")
-    if any(path_str.startswith(p) for p in skip_prefixes):
-        return False  # don't stop, just log
-
-    print(f"[maketex] + FileNode  {role_name:<12} {basename}")
+    if not any(path_str.startswith(p) for p in skip_prefixes):
+        print(f"[maketex] + FileNode  {role_name:<12} {basename}")
     return False  # don't stop — too noisy to pause on every file
 
 

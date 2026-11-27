@@ -80,7 +80,7 @@ private:
     Exclusion m_exclude;
 
     mutable std::mutex m_mutex;
-    std::condition_variable_any m_wake;
+    std::condition_variable m_wake;
     bool m_nudged = false;
     int m_wakeWriteFd = -1;
 };
