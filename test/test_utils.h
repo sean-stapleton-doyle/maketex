@@ -11,6 +11,7 @@
 #include <filesystem>
 #include <fstream>
 #include <memory>
+#include <mutex>
 #include <optional>
 #include <regex>
 #include <string>
@@ -34,14 +35,24 @@ public:
     std::expected<Hash, std::error_code> hashFile(
         const fs::path&, const std::optional<std::regex>&) const override
     {
-        ++callCount;
+        std::lock_guard lock(m_mutex);
+        ++m_callCount;
         return returnHash;
     }
 
     Hash hashBytes(std::string_view) const override { return returnHash; }
 
-    mutable int callCount = 0;
+    int callCount() const
+    {
+        std::lock_guard lock(m_mutex);
+        return m_callCount;
+    }
+
     Hash returnHash { };
+
+private:
+    mutable std::mutex m_mutex;
+    mutable int m_callCount = 0;
 };
 
 // A temp path unique to the running test: ctest runs every discovered test

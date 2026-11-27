@@ -86,7 +86,7 @@ TARGET="${OS}-${ARCH}"
 
 if [ -z "$VERSION" ]; then
     # Follow the /releases/latest redirect without consuming GitHub API rate limit.
-    LATEST_URL="$(curl -fsSL -o /dev/null -w '%{url_effective}' "https://github.com/${REPO}/releases/latest")"
+    LATEST_URL="$(curl --proto '=https' --tlsv1.2 -fsSL -o /dev/null -w '%{url_effective}' "https://github.com/${REPO}/releases/latest")"
     VERSION="${LATEST_URL##*/}"
     if [ -z "$VERSION" ] || [ "$VERSION" = "latest" ]; then
         echo "error: failed to resolve latest release tag from ${LATEST_URL}" >&2
@@ -118,8 +118,8 @@ cleanup() {
 trap cleanup EXIT INT TERM
 
 echo "Downloading maketex ${TAG} (${TARGET})..."
-curl -fsSL "${BASE_URL}/${ARCHIVE}" -o "${TMP_DIR}/${ARCHIVE}"
-curl -fsSL "${BASE_URL}/SHA256SUMS.txt" -o "${TMP_DIR}/SHA256SUMS.txt"
+curl --proto '=https' --tlsv1.2 -fsSL "${BASE_URL}/${ARCHIVE}" -o "${TMP_DIR}/${ARCHIVE}"
+curl --proto '=https' --tlsv1.2 -fsSL "${BASE_URL}/SHA256SUMS.txt" -o "${TMP_DIR}/SHA256SUMS.txt"
 
 EXPECTED_SHA="$(awk -v file="$ARCHIVE" '$2 == file { print $1; exit }' "${TMP_DIR}/SHA256SUMS.txt")"
 if [ -z "$EXPECTED_SHA" ]; then

@@ -367,7 +367,7 @@ namespace {
     class BuildLock {
     public:
         explicit BuildLock(const fs::path& path)
-            : m_fd(::open(path.c_str(), O_RDWR | O_CREAT | O_CLOEXEC, 0644))
+            : m_fd(::open(path.c_str(), O_RDWR | O_CREAT | O_CLOEXEC, 0600))
         {
             if (m_fd >= 0)
                 while (::flock(m_fd, LOCK_EX) != 0 && errno == EINTR) { }
@@ -1004,9 +1004,11 @@ namespace {
 
     bool sameContent(const fs::path& a, const fs::path& b)
     {
-        std::error_code ec;
-        auto size = fs::file_size(a, ec);
-        if (ec || fs::file_size(b, ec) != size || ec)
+        std::error_code ecA;
+        std::error_code ecB;
+        auto sizeA = fs::file_size(a, ecA);
+        auto sizeB = fs::file_size(b, ecB);
+        if (ecA || ecB || sizeA != sizeB)
             return false;
         std::ifstream fa(a, std::ios::binary);
         std::ifstream fb(b, std::ios::binary);
