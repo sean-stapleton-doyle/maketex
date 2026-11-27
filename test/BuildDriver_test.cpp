@@ -14,6 +14,7 @@
 
 #include <gtest/gtest.h>
 
+#include <atomic>
 #include <chrono>
 #include <filesystem>
 #include <fstream>
@@ -78,7 +79,7 @@ public:
 
     void addInput(fs::path path) { m_extraInputs.push_back(std::move(path)); }
     void setFails(bool fails) { m_fails = fails; }
-    int runCount() const { return m_runCount; }
+    int runCount() const { return m_runCount.load(); }
 
 private:
     fs::path m_trigger;
@@ -86,7 +87,7 @@ private:
     std::string m_outputContent;
     std::vector<fs::path> m_extraInputs;
     bool m_fails = false;
-    mutable int m_runCount = 0;
+    mutable std::atomic<int> m_runCount { 0 };
 };
 
 // ── FakeEngine ────────────────────────────────────────────────────────────────
