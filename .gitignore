@@ -45,3 +45,9 @@ testdata/**/*.stdout
 # CTest scratch and local analysis output
 Testing/
 graphify-out/
+build-coverage/
+coverage.xml
+*.gcda
+*.gcno
+*.profraw
+*.profdata
