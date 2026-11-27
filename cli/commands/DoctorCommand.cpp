@@ -9,6 +9,7 @@
 
 #include <algorithm>
 #include <chrono>
+#include <cstdlib>
 #include <format>
 #include <iostream>
 #include <set>
@@ -66,7 +67,7 @@ namespace {
     // Runs from `workingDir` (the document's directory) with any configured
     // texinputs prepended to TEXINPUTS so local/shared .cls/.sty files are
     // found just as the engine will find them.
-    std::set<std::string> findTexFiles(const std::vector<std::string>& files,
+    std::set<std::string> kpsewhichFindTexFiles(const std::vector<std::string>& files,
         const fs::path& workingDir, const std::vector<std::string>& texInputs)
     {
         std::set<std::string> found;
@@ -100,6 +101,65 @@ namespace {
         return found;
     }
 
+    class SystemDoctorEnv final : public IDoctorEnv {
+    public:
+        std::optional<fs::path> findProgram(const std::string& name) override
+        {
+            return maketex::cli::findProgram(name);
+        }
+
+        std::string programVersion(const fs::path& program, std::string_view flag) override
+        {
+            return versionOf(program, flag);
+        }
+
+        TexDistribution detectDistribution() override
+        {
+            return maketex::cli::detectDistribution();
+        }
+
+        InstallCapability installCapability(TexDistribution distro, bool interactive) override
+        {
+            return maketex::cli::installCapability(distro, interactive);
+        }
+
+        PackageLookup packageLookup(TexDistribution distro) override
+        {
+            return distro == TexDistribution::TexLive ? tlmgrLookup(userCacheDir())
+                                                      : PackageLookup { };
+        }
+
+        DocumentRequirements analyzeRequirements(const fs::path& texFile) override
+        {
+            return maketex::analyzeRequirements(texFile);
+        }
+
+        EngineChoice chooseEngine(const BuildOptions& build) override
+        {
+            return maketex::chooseEngine(build);
+        }
+
+        std::set<std::string> findTexFiles(const std::vector<std::string>& files,
+            const fs::path& workingDir, const std::vector<std::string>& texInputs) override
+        {
+            return kpsewhichFindTexFiles(files, workingDir, texInputs);
+        }
+
+        bool installPackages(const std::vector<std::string>& packages,
+            InstallCapability::Access access, std::ostream& log) override
+        {
+            return maketex::cli::installPackages(packages, access, log);
+        }
+
+        bool isInteractive() const override
+        {
+            return ::isatty(STDIN_FILENO) == 1 && ::isatty(STDERR_FILENO) == 1;
+        }
+
+        std::ostream& out() override { return std::cout; }
+        std::ostream& err() override { return std::cerr; }
+    };
+
     std::string_view distributionName(TexDistribution d)
     {
         switch (d) {
@@ -120,8 +180,13 @@ namespace {
     // Prints check lines and counts the problems that matter.
     class Report {
     public:
-        void section(std::string_view title) { std::cout << "\n"
-                                                         << title << "\n"; }
+        explicit Report(std::ostream& out)
+            : m_out(out)
+        {
+        }
+
+        void section(std::string_view title) { m_out << "\n"
+                                                     << title << "\n"; }
         void ok(std::string_view what, std::string_view detail = { })
         {
             line("✓", what, detail);
@@ -146,18 +211,20 @@ namespace {
         int warnings() const { return m_warnings; }
 
     private:
-        static void line(std::string_view mark, std::string_view what, std::string_view detail)
+        void line(std::string_view mark, std::string_view what, std::string_view detail)
         {
-            std::cout << "  " << mark << " " << what;
+            m_out << "  " << mark << " " << what;
             if (!detail.empty())
-                std::cout << "  " << detail;
-            std::cout << "\n";
+                m_out << "  " << detail;
+            m_out << "\n";
         }
-        static void hintLine(std::string_view hint)
+        void hintLine(std::string_view hint)
         {
             if (!hint.empty())
-                std::cout << "      hint: " << hint << "\n";
+                m_out << "      hint: " << hint << "\n";
         }
+
+        std::ostream& m_out;
         int m_problems = 0;
         int m_warnings = 0;
     };
@@ -167,122 +234,117 @@ namespace {
     // hint and install code consume).
     std::vector<Diagnostic> documentGaps(const DocumentRequirements& req,
         const fs::path& docDir, const EngineChoice& engine,
-        const std::vector<std::string>& texInputs)
+        const std::vector<std::string>& texInputs, IDoctorEnv& env)
     {
         std::vector<std::string> files;
         if (!req.documentClass.empty())
             files.push_back(req.documentClass + ".cls");
         for (const auto& p : req.packages)
             files.push_back(p + ".sty");
-        auto found = findTexFiles(files, docDir, texInputs);
+        auto found = env.findTexFiles(files, docDir, texInputs);
 
         std::vector<Diagnostic> gaps;
         std::string engineProg(engineKindName(engine.kind));
-        if (!findProgram(engineProg))
+        if (!env.findProgram(engineProg))
             gaps.push_back({ .message = "engine", .category = "missing-tool", .missingFile = engineProg });
         for (const auto& f : files)
             if (!found.contains(f))
                 gaps.push_back({ .message = f, .category = "missing-file", .missingFile = f });
         for (const auto& [program, why] : req.programs)
-            if (!findProgram(program))
+            if (!env.findProgram(program))
                 gaps.push_back({ .message = why, .category = "missing-tool", .missingFile = program });
         return gaps;
     }
 
-} // namespace
-
-int runDoctorCommand(const EffectiveOptions& options)
-{
-    Report report;
-    const bool interactive = ::isatty(STDIN_FILENO) && ::isatty(STDERR_FILENO);
-
-    // ── TeX installation ─────────────────────────────────────────────────
-    report.section("TeX installation");
-    auto distro = TexDistribution::Unknown;
-    if (auto kpsewhich = findProgram("kpsewhich")) {
-        distro = detectDistribution();
-        report.ok(distributionName(distro), versionOf(*kpsewhich, "--version"));
-        auto capability = installCapability(distro, interactive);
-        switch (capability.access) {
-        case InstallCapability::Access::Direct:
-            report.ok("package installs", "tlmgr can install into the TeX tree; builds install missing packages");
-            break;
-        case InstallCapability::Access::Sudo:
-            report.info("package installs",
-                "builds ask before installing with sudo: " + capability.reason);
-            break;
-        case InstallCapability::Access::Unavailable:
-            report.info("package installs", capability.reason);
-            break;
-        }
-    } else {
-        report.fail("no TeX installation on PATH", { },
-            "install TeX Live (MacTeX or BasicTeX on macOS), or add its bin directory to PATH");
-    }
-    const PackageLookup lookup = distro == TexDistribution::TexLive ? tlmgrLookup(userCacheDir())
-                                                                    : PackageLookup { };
-
-    // ── Document requirements (computed first: they decide what's required)
-    std::optional<DocumentRequirements> req;
-    if (!options.build.texFile.empty())
-        req = analyzeRequirements(options.build.texFile);
-    auto engine = req ? chooseEngine(options.build) : EngineChoice { };
-    const fs::path docDir = options.build.texFile.empty()
-        ? fs::current_path()
-        : options.build.texFile.parent_path();
-
-    // doctor diagnoses by default; when --install-missing is given explicitly,
-    // install missing engines, tools, and packages before reporting so every
-    // section reflects the final state of the system.
-    if (req && options.extras.installMissingRequested) {
-        auto gaps = documentGaps(*req, docDir, engine, options.build.searchPaths.texInputs);
-        if (!gaps.empty()) {
-            auto plan = planInstall(gaps, lookup);
-            auto capability = installCapability(distro, interactive);
-            if (!plan.packages.empty() && capability.access != InstallCapability::Access::Unavailable)
-                installPackages(plan.packages, capability.access, std::cerr);
-        }
-    }
-
-    // ── Engines ──────────────────────────────────────────────────────────
-    report.section("Engines");
-    int engines = 0;
-    for (auto kind : { EngineKind::PdfLaTeX, EngineKind::XeLaTeX, EngineKind::LuaLaTeX }) {
-        std::string name(engineKindName(kind));
-        bool needed = req && engine.kind == kind;
-        if (auto path = findProgram(name)) {
-            ++engines;
-            report.ok(name, versionOf(*path, "--version"));
-        } else if (needed) {
-            report.fail(name, "not installed — this document needs it",
-                installHint(name, distro, lookup));
+    TexDistribution checkTexInstallation(Report& report, IDoctorEnv& env, bool interactive)
+    {
+        report.section("TeX installation");
+        auto distro = TexDistribution::Unknown;
+        if (auto kpsewhich = env.findProgram("kpsewhich")) {
+            distro = env.detectDistribution();
+            report.ok(distributionName(distro), env.programVersion(*kpsewhich, "--version"));
+            auto capability = env.installCapability(distro, interactive);
+            switch (capability.access) {
+            case InstallCapability::Access::Direct:
+                report.ok("package installs", "tlmgr can install into the TeX tree; builds install missing packages");
+                break;
+            case InstallCapability::Access::Sudo:
+                report.info("package installs",
+                    "builds ask before installing with sudo: " + capability.reason);
+                break;
+            case InstallCapability::Access::Unavailable:
+                report.info("package installs", capability.reason);
+                break;
+            }
         } else {
-            report.info(name, "not installed");
+            report.fail("no TeX installation on PATH", { },
+                "install TeX Live (MacTeX or BasicTeX on macOS), or add its bin directory to PATH");
         }
-    }
-    if (engines == 0 && !req)
-        report.fail("no TeX engine installed");
-
-    // ── Tools ────────────────────────────────────────────────────────────
-    report.section("Tools");
-    for (const auto& tool : kTools) {
-        std::string name(tool.program);
-        auto need = req ? std::ranges::find(req->programs, name, &std::pair<std::string, std::string>::first)
-                        : decltype(req->programs.end()) { };
-        bool needed = req && need != req->programs.end();
-        if (auto path = findProgram(name)) {
-            auto version = versionOf(*path, tool.versionFlag);
-            report.ok(name, version.empty() ? std::format("for {}", tool.purpose) : version);
-        } else if (needed) {
-            report.fail(name, std::format("not installed — this document {}", need->second),
-                installHint(name, distro, lookup));
-        } else {
-            report.info(name, std::format("not installed (needed for {})", tool.purpose));
-        }
+        return distro;
     }
 
-    // ── Document ─────────────────────────────────────────────────────────
-    if (req) {
+    void maybeInstallMissing(const EffectiveOptions& options, const DocumentRequirements& req,
+        const fs::path& docDir, const EngineChoice& engine, TexDistribution distro,
+        const PackageLookup& lookup, bool interactive, IDoctorEnv& env)
+    {
+        auto gaps = documentGaps(req, docDir, engine, options.build.searchPaths.texInputs, env);
+        if (gaps.empty())
+            return;
+        auto plan = planInstall(gaps, lookup);
+        auto capability = env.installCapability(distro, interactive);
+        if (!plan.packages.empty() && capability.access != InstallCapability::Access::Unavailable)
+            env.installPackages(plan.packages, capability.access, env.err());
+    }
+
+    void checkEngines(Report& report, IDoctorEnv& env,
+        const std::optional<DocumentRequirements>& req, const EngineChoice& engine,
+        TexDistribution distro, const PackageLookup& lookup)
+    {
+        report.section("Engines");
+        int engines = 0;
+        for (auto kind : { EngineKind::PdfLaTeX, EngineKind::XeLaTeX, EngineKind::LuaLaTeX }) {
+            std::string name(engineKindName(kind));
+            bool needed = req && engine.kind == kind;
+            if (auto path = env.findProgram(name)) {
+                ++engines;
+                report.ok(name, env.programVersion(*path, "--version"));
+            } else if (needed) {
+                report.fail(name, "not installed — this document needs it",
+                    installHint(name, distro, lookup));
+            } else {
+                report.info(name, "not installed");
+            }
+        }
+        if (engines == 0 && !req)
+            report.fail("no TeX engine installed");
+    }
+
+    void checkTools(Report& report, IDoctorEnv& env,
+        const std::optional<DocumentRequirements>& req,
+        TexDistribution distro, const PackageLookup& lookup)
+    {
+        report.section("Tools");
+        for (const auto& tool : kTools) {
+            std::string name(tool.program);
+            auto need = req ? std::ranges::find(req->programs, name, &std::pair<std::string, std::string>::first)
+                            : decltype(req->programs.end()) { };
+            bool needed = req && need != req->programs.end();
+            if (auto path = env.findProgram(name)) {
+                auto version = env.programVersion(*path, tool.versionFlag);
+                report.ok(name, version.empty() ? std::format("for {}", tool.purpose) : version);
+            } else if (needed) {
+                report.fail(name, std::format("not installed — this document {}", need->second),
+                    installHint(name, distro, lookup));
+            } else {
+                report.info(name, std::format("not installed (needed for {})", tool.purpose));
+            }
+        }
+    }
+
+    void checkDocument(Report& report, IDoctorEnv& env, const EffectiveOptions& options,
+        const DocumentRequirements& req, const fs::path& docDir,
+        const EngineChoice& engine, TexDistribution distro, const PackageLookup& lookup)
+    {
         report.section(std::format("Document {}", options.build.texFile.filename().string()));
         report.ok("engine",
             std::format("{}{}", engineKindName(engine.kind),
@@ -290,10 +352,10 @@ int runDoctorCommand(const EffectiveOptions& options)
                     : engine.reason.empty() ? " (default)"
                                             : " (" + engine.reason + ")"));
 
-        auto gaps = documentGaps(*req, docDir, engine, options.build.searchPaths.texInputs);
+        auto gaps = documentGaps(req, docDir, engine, options.build.searchPaths.texInputs, env);
 
-        const std::size_t pkgCount = req->packages.size();
-        const bool hasClass = !req->documentClass.empty();
+        const std::size_t pkgCount = req.packages.size();
+        const bool hasClass = !req.documentClass.empty();
         auto missingTexFiles = std::ranges::count(gaps, std::string("missing-file"), &Diagnostic::category);
         if (missingTexFiles == 0) {
             if (hasClass)
@@ -306,21 +368,59 @@ int runDoctorCommand(const EffectiveOptions& options)
         for (const auto& gap : gaps)
             if (gap.category == "missing-file")
                 report.fail(gap.missingFile, "not installed", installHint(gap.missingFile, distro, lookup));
-        if (req->needsShellEscape && !options.build.shellEscape)
+        if (req.needsShellEscape && !options.build.shellEscape)
             report.warn("shell escape", "the document runs external programs (minted, svg, tikz externalize)",
                 "build with --shell-escape, or set `shell-escape = true` in maketex.toml "
                 "(only for documents you trust)");
-    } else {
-        std::cout << "\n(pass a document — `maketex doctor thesis.tex` — to check its packages too)\n";
     }
 
-    std::cout << "\n";
+} // namespace
+
+int runDoctorCommand(const EffectiveOptions& options, IDoctorEnv& env)
+{
+    Report report(env.out());
+    const bool interactive = env.isInteractive();
+
+    const TexDistribution distro = checkTexInstallation(report, env, interactive);
+    const PackageLookup lookup = env.packageLookup(distro);
+
+    // Document requirements (computed first: they decide what's required).
+    std::optional<DocumentRequirements> req;
+    if (!options.build.texFile.empty())
+        req = env.analyzeRequirements(options.build.texFile);
+    auto engine = req ? env.chooseEngine(options.build) : EngineChoice { };
+    const fs::path docDir = options.build.texFile.empty()
+        ? fs::current_path()
+        : options.build.texFile.parent_path();
+
+    // doctor diagnoses by default; when --install-missing is given explicitly,
+    // install missing engines, tools, and packages before reporting so every
+    // section reflects the final state of the system.
+    if (req && options.extras.installMissingRequested)
+        maybeInstallMissing(options, *req, docDir, engine, distro, lookup, interactive, env);
+
+    checkEngines(report, env, req, engine, distro, lookup);
+    checkTools(report, env, req, distro, lookup);
+
+    if (req) {
+        checkDocument(report, env, options, *req, docDir, engine, distro, lookup);
+    } else {
+        env.out() << "\n(pass a document — `maketex doctor thesis.tex` — to check its packages too)\n";
+    }
+
+    env.out() << "\n";
     if (report.problems() == 0)
-        std::cout << "maketex doctor: everything needed is installed\n";
+        env.out() << "maketex doctor: everything needed is installed\n";
     else
-        std::cout << std::format("maketex doctor: {} problem{} found\n", report.problems(),
+        env.out() << std::format("maketex doctor: {} problem{} found\n", report.problems(),
             report.problems() == 1 ? "" : "s");
     return report.problems() == 0 ? kExitSuccess : kExitEnvironment;
+}
+
+int runDoctorCommand(const EffectiveOptions& options)
+{
+    SystemDoctorEnv env;
+    return runDoctorCommand(options, env);
 }
 
 } // namespace maketex::cli
