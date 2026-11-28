@@ -7,6 +7,8 @@
 #include "maketex/Launch.h"
 #include "maketex/ToolContext.h"
 #include "maketex/ToolInvocation.h"
+#include "maketex/driver/PassAnalysis.h"
+#include "maketex/driver/ToolWaves.h"
 #include "maketex/graph/FileNode.h"
 #include "maketex/parsers/AuxParser.h"
 #include "maketex/parsers/FlsParser.h"
@@ -15,10 +17,10 @@
 
 #include <algorithm>
 #include <ctime>
-#include <format>
 #include <iterator>
 #include <thread>
 #include <unordered_set>
+#include <utility>
 
 namespace maketex {
 
@@ -43,6 +45,8 @@ BuildDriver::BuildDriver(IEngine& engine,
     , m_preambleProvider(std::move(config.preambleProvider))
     , m_draftFirstPass(config.draftFirstPass)
     , m_xelatexXdvSplit(config.xelatexXdvSplit)
+    , m_processRunner(std::move(config.processRunner))
+    , m_clock(std::move(config.clock))
 {
 }
 
@@ -58,6 +62,11 @@ void BuildDriver::notify(const BuildEvent& event) const
 {
     if (m_observer)
         m_observer(event);
+}
+
+std::int64_t BuildDriver::nowEpoch() const
+{
+    return m_clock ? m_clock() : static_cast<std::int64_t>(std::time(nullptr));
 }
 
 // ── helpers ───────────────────────────────────────────────────────────────────
@@ -78,84 +87,20 @@ namespace {
         };
     }
 
-    // Files the engine writes for the user, for maketex, or for other tools,
-    // never content a following pass depends on: excluded from convergence
-    // snapshots (hashing a large PDF every pass would be pure cost). The
-    // .run.xml is logreq's request list for external build tools; biblatex
-    // flips its "active" flags from pass to pass.
-    bool isFinalProduct(const fs::path& p)
-    {
-        auto name = p.filename().string();
-        for (std::string_view ext : { ".pdf", ".dvi", ".xdv", ".log", ".fls",
-                 ".synctex.gz", ".synctex", ".run.xml" })
-            if (name.ends_with(ext))
-                return true;
-        return false;
-    }
-
-    // "biber is not installed", "latex exited with code 1", …
-    template <typename Inv>
-    std::string failureMessage(const std::string& what, const RunResult<Inv>& r)
-    {
-        if (r.notFound)
-            return r.program + " is not installed (not found on PATH)";
-        if (r.cancelled)
-            return "cancelled";
-        if (r.timedOut)
-            return what + " timed out";
-        return what + " exited with code " + std::to_string(r.exitCode);
-    }
-
     std::string key(const fs::path& p)
     {
         return fs::weakly_canonical(p).string();
     }
 
     void recordRule(StateDatabase& db, const std::string& name, bool succeeded,
-        const std::string& command)
+        const std::string& command, std::int64_t ranAt)
     {
         db.upsertRule(RuleRecord {
             .name = name,
             .command = command,
-            .ran_at = static_cast<int64_t>(std::time(nullptr)),
+            .ran_at = ranAt,
             .succeeded = succeeded,
         });
-    }
-
-    // Filters ignored non-error diagnostics and promotes warnings to errors
-    // according to policy. Returns an error summary if the policy failed the
-    // build, or empty when the build still passes.
-    std::string applyDiagnosticPolicy(std::vector<Diagnostic>& diagnostics,
-        const DiagnosticPolicy& policy)
-    {
-        if (!policy.ignore.empty()) {
-            std::erase_if(diagnostics, [&](const Diagnostic& d) {
-                return d.severity != Diagnostic::Severity::Error
-                    && !d.category.empty()
-                    && std::ranges::contains(policy.ignore, d.category);
-            });
-        }
-
-        int promoted = 0;
-        std::string firstCategory;
-        for (auto& d : diagnostics) {
-            if (d.severity != Diagnostic::Severity::Warning)
-                continue;
-            bool fail = policy.warningsAsErrors
-                || (!d.category.empty() && std::ranges::contains(policy.failOn, d.category));
-            if (fail) {
-                d.severity = Diagnostic::Severity::Error;
-                if (firstCategory.empty())
-                    firstCategory = d.category;
-                ++promoted;
-            }
-        }
-        if (promoted == 0)
-            return { };
-        if (policy.warningsAsErrors)
-            return std::format("{} warning{} treated as error{}",
-                promoted, promoted == 1 ? "" : "s", promoted == 1 ? "" : "s");
-        return std::format("failed on {} warning{}", firstCategory, promoted == 1 ? "" : "s");
     }
 
 } // namespace
@@ -240,7 +185,7 @@ BuildDriver::takeSnapshot(FileStateTracker& tracker)
 {
     Digests snap;
     for (auto* f : m_graph.files()) {
-        if (f->role() == FileRole::Source || isFinalProduct(f->path()))
+        if (f->role() == FileRole::Source || driver::isFinalProduct(f->path()))
             continue;
         auto state = f->refresh(tracker);
         if (!state)
@@ -278,7 +223,7 @@ bool BuildDriver::engineUpToDate(FileStateTracker& tracker)
     // A read-back file counts only if it existed when the build was
     // recorded: minted writes, reads, and deletes main.pyg in every pass.
     for (auto* node : latexRule->outputs()) {
-        bool needed = isFinalProduct(node->path())
+        bool needed = driver::isFinalProduct(node->path())
             || (node->role() == FileRole::Generated
                 && m_db.getRuleInputHash(engineRuleName(), node->path().string()));
         if (needed && !fs::exists(node->path()))
@@ -420,35 +365,16 @@ BuildDriver::ToolPassOutcome BuildDriver::runStaleTools(
     if (pending.empty())
         return outcome;
 
-    // Group stale tools into waves that can safely execute in parallel: two
-    // tools conflict if either has unknown outputs, or if they share an output
-    // path or one's output is the other's declared input (even if that input
-    // does not exist yet before the earlier wave runs).
-    auto conflicts = [](const PendingTool& a, const PendingTool& b) {
-        if (a.outputs.empty() || b.outputs.empty())
-            return true;
-        for (const auto& out : a.outputKeys)
-            if (b.outputKeys.contains(out) || b.inputKeys.contains(out))
-                return true;
-        for (const auto& out : b.outputKeys)
-            if (a.inputKeys.contains(out))
-                return true;
-        return false;
-    };
-
-    std::vector<std::vector<size_t>> waves;
-    for (size_t idx = 0; idx < pending.size(); ++idx) {
-        if (!waves.empty()) {
-            bool canJoin = std::ranges::none_of(waves.back(), [&](size_t prev) {
-                return conflicts(pending[prev], pending[idx]);
-            });
-            if (canJoin) {
-                waves.back().push_back(idx);
-                continue;
-            }
-        }
-        waves.push_back({ idx });
+    std::vector<driver::ToolFootprint> footprints;
+    footprints.reserve(pending.size());
+    for (const auto& p : pending) {
+        footprints.push_back(driver::ToolFootprint {
+            .inputKeys = p.inputKeys,
+            .outputKeys = p.outputKeys,
+            .outputsUnknown = p.outputs.empty(),
+        });
     }
+    auto waves = driver::planToolWaves(footprints);
 
     for (size_t waveIdx = 0; waveIdx < waves.size(); ++waveIdx) {
         const auto& wave = waves[waveIdx];
@@ -472,8 +398,8 @@ BuildDriver::ToolPassOutcome BuildDriver::runStaleTools(
             notify({ .kind = BuildEvent::Kind::ToolStarted,
                 .toolName = std::string(item.tool->name()) });
             auto workingDir = item.inv.workingDir;
-            results.push_back(launchProcess(item.args, workingDir, item.tool->invokerKind(),
-                item.inv, toolEnv, m_processLimits));
+            results.push_back(launchProcess(m_processRunner, item.args, workingDir,
+                item.tool->invokerKind(), item.inv, toolEnv, m_processLimits));
             notify({ .kind = BuildEvent::Kind::ToolFinished,
                 .toolName = std::string(item.tool->name()),
                 .success = results.back().success() });
@@ -490,7 +416,7 @@ BuildDriver::ToolPassOutcome BuildDriver::runStaleTools(
                     const size_t idx = wave[i];
                     workers.emplace_back([&, i, idx] {
                         const auto& p = pending[idx];
-                        waveResults[i] = launchProcess(p.args, p.inv.workingDir,
+                        waveResults[i] = launchProcess(m_processRunner, p.args, p.inv.workingDir,
                             p.tool->invokerKind(), p.inv, toolEnv, m_processLimits);
                     });
                 }
@@ -509,7 +435,7 @@ BuildDriver::ToolPassOutcome BuildDriver::runStaleTools(
             auto& toolResult = results[i];
             auto ruleName = toolRuleName(*item.tool);
             if (!toolResult.success()) {
-                recordRule(m_db, ruleName, false, std::string(item.tool->name()));
+                recordRule(m_db, ruleName, false, std::string(item.tool->name()), nowEpoch());
                 if (!outcome.failure) {
                     outcome.failedToolName = std::string(item.tool->name());
                     outcome.failure = std::move(toolResult);
@@ -530,7 +456,7 @@ BuildDriver::ToolPassOutcome BuildDriver::runStaleTools(
                 if (*after)
                     producedOutputs.emplace_back(key(item.outputs[j]), **after);
             }
-            auto now = static_cast<int64_t>(std::time(nullptr));
+            auto now = nowEpoch();
             const std::string command(item.tool->name());
             m_db.recordRun({ .name = ruleName + "#outputs", .command = command, .ran_at = now, .succeeded = true },
                 producedOutputs);
@@ -646,7 +572,7 @@ DriverResult BuildDriver::run()
             result.lastError = "snapshot failed: " + outcome.snapshotError->message();
             return;
         }
-        result.lastError = failureMessage(outcome.failedToolName, *outcome.failure);
+        result.lastError = driver::failureMessage(outcome.failedToolName, *outcome.failure);
         result.diagnostics = diagnostics::extract(*outcome.failure);
     };
 
@@ -665,9 +591,8 @@ DriverResult BuildDriver::run()
             // (mtime, size) fast path can skip rehashing.
             persistFileStates();
             result.diagnostics = std::move(tools.diagnostics);
-            if (auto policyError = applyDiagnosticPolicy(result.diagnostics, m_diagnosticPolicy);
-                !policyError.empty()) {
-                result.lastError = std::move(policyError);
+            if (auto policyError = applyDiagnosticPolicy(result.diagnostics, m_diagnosticPolicy)) {
+                result.lastError = std::move(*policyError);
                 result.success = false;
                 return result;
             }
@@ -713,7 +638,7 @@ DriverResult BuildDriver::run()
 
         if (!engineResult.success()) {
             latexRule.markRan(m_db, false, command);
-            result.lastError = failureMessage("latex", engineResult);
+            result.lastError = driver::failureMessage("latex", engineResult);
             result.diagnostics = diagnostics::extract(engineResult);
             return result;
         }
@@ -734,20 +659,8 @@ DriverResult BuildDriver::run()
             result.lastError = "snapshot failed: " + after.error().message();
             return result;
         }
-        // A rerun is needed when a file the engine reads back (role
-        // Generated, e.g. .aux, .toc) changed under the pass. Write-only
-        // outputs (.idx, .bcf) are the tools' business. Only files that
-        // existed before the pass can have changed; one written for the
-        // first time is caught by the log (a rerun warning, or "No file …"
-        // for something now present).
-        auto files = m_graph.files();
-        auto readBackChanged = std::ranges::find_if(files, [&](const FileNode* f) {
-            if (f->role() != FileRole::Generated)
-                return false;
-            auto was = before->find(f->path().string());
-            auto now = after->find(f->path().string());
-            return was != before->end() && (now == after->end() || now->second != was->second);
-        });
+        auto readBackChanged = driver::firstChangedReadBack(
+            std::as_const(m_graph).files(), *before, *after);
 
         auto ctx = makeToolContext();
         auto tools = runStaleTools(ctx, tracker);
@@ -758,26 +671,21 @@ DriverResult BuildDriver::run()
         }
         std::ranges::move(tools.diagnostics, std::back_inserter(toolWarnings));
 
-        std::vector<std::string> reasons;
-        if (ctx.log().rerunNeeded)
-            reasons.emplace_back("LaTeX asked for a rerun");
-        if (readBackChanged != files.end())
-            reasons.push_back((*readBackChanged)->path().filename().string() + " changed");
-        if (auto appeared = appearedInput(ctx.log()))
-            reasons.push_back(*appeared);
-        if (edited)
-            reasons.push_back(edited->filename().string() + " was saved during the pass");
-        reasons.insert(reasons.end(), tools.changes.begin(), tools.changes.end());
-        // If pass 1 ran with -draftmode (pdflatex/lualatex) and unexpectedly
-        // produced no rerun signals, run one non-draft pass to emit the PDF.
-        if (reasons.empty() && pass == 0 && m_draftFirstPass && !m_xelatexXdvSplit)
-            reasons.emplace_back("emitting final PDF after draft pass");
+        auto reasons = driver::rerunReasons(driver::PassSignals {
+            .pass = pass,
+            .logAskedRerun = ctx.log().rerunNeeded,
+            .readBackChanged = std::move(readBackChanged),
+            .appearedInput = appearedInput(ctx.log()),
+            .editedDuringPass = std::move(edited),
+            .toolChanges = std::move(tools.changes),
+            .draftFirstPass = m_draftFirstPass,
+            .xdvSplit = m_xelatexXdvSplit,
+        });
         if (!reasons.empty()) {
-            std::string why;
-            for (const auto& r : reasons)
-                why += (why.empty() ? "" : "; ") + r;
-            result.rerunReasons.push_back(std::format("pass {}: {}", pass + 2, why));
-            notify({ .kind = BuildEvent::Kind::RerunScheduled, .pass = pass + 2, .detail = why });
+            result.rerunReasons.push_back(driver::formatRerunReason(pass + 2, reasons));
+            notify({ .kind = BuildEvent::Kind::RerunScheduled,
+                .pass = pass + 2,
+                .detail = driver::joinRerunReasons(reasons) });
         }
         if (reasons.empty()) {
             // XeLaTeX -no-pdf split: convert the converged .xdv to .pdf once.
@@ -796,14 +704,14 @@ DriverResult BuildDriver::run()
                         m_inv.resolvedJobName() + ".xdv"
                     };
                     auto xdvEnv = toolSearchEnv(m_inv.texFile.parent_path(), m_inv.extraEnv);
-                    auto xdvRes = launchProcess(xdvArgs, m_inv.outputDir, InvokerKind::Xdvipdfmx,
-                        std::move(xdvInv), xdvEnv, m_processLimits);
+                    auto xdvRes = launchProcess(m_processRunner, xdvArgs, m_inv.outputDir,
+                        InvokerKind::Xdvipdfmx, std::move(xdvInv), xdvEnv, m_processLimits);
                     notify({ .kind = BuildEvent::Kind::ToolFinished,
                         .toolName = "xdvipdfmx",
                         .success = xdvRes.success() });
                     if (!xdvRes.success()) {
                         latexRule.markRan(m_db, false, command);
-                        result.lastError = failureMessage("xdvipdfmx", xdvRes);
+                        result.lastError = driver::failureMessage("xdvipdfmx", xdvRes);
                         result.diagnostics = diagnostics::extract(xdvRes);
                         return result;
                     }
@@ -813,13 +721,12 @@ DriverResult BuildDriver::run()
 
             result.diagnostics = diagnostics::extract(engineResult);
             std::ranges::move(toolWarnings, std::back_inserter(result.diagnostics));
-            if (auto policyError = applyDiagnosticPolicy(result.diagnostics, m_diagnosticPolicy);
-                !policyError.empty()) {
+            if (auto policyError = applyDiagnosticPolicy(result.diagnostics, m_diagnosticPolicy)) {
                 // Failed by diagnostic policy: don't record as succeeded so
                 // the next invocation does not skip as "up to date".
                 latexRule.markRan(m_db, false, command);
                 persistFileStates();
-                result.lastError = std::move(policyError);
+                result.lastError = std::move(*policyError);
                 result.success = false;
                 return result;
             }

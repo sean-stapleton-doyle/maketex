@@ -140,6 +140,7 @@ add_library(maketex STATIC
     src/StateDatabase.cpp
     src/PathCodec.cpp
     src/Process.cpp
+    src/ProcessRunner.cpp
     src/EngineBase.cpp
     src/ToolContext.cpp
     src/ToolFactory.cpp
@@ -154,6 +155,7 @@ add_library(maketex STATIC
     src/tools/MakeglossariesTool.cpp
     src/DiagnosticExtractor.cpp
     src/DiagnosticFormatter.cpp
+    src/DiagnosticPolicy.cpp
     src/DocumentProbe.cpp
     src/Blake3Hasher.cpp
     src/FileStateTracker.cpp
@@ -164,6 +166,8 @@ add_library(maketex STATIC
     src/graph/FileNode.cpp
     src/graph/RuleNode.cpp
     src/graph/BuildGraph.cpp
+    src/driver/PassAnalysis.cpp
+    src/driver/ToolWaves.cpp
     src/BuildDriver.cpp
     src/engines/EngineFactory.cpp
     src/Build.cpp

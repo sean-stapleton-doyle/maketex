@@ -3,6 +3,7 @@
 #include "maketex/EngineArguments.h"
 #include "maketex/EngineInvocation.h"
 #include "maketex/IEngine.h"
+#include "maketex/ProcessRunner.h"
 #include "maketex/RunResult.h"
 
 #include <string>
@@ -20,8 +21,9 @@ namespace maketex {
 class EngineBase : public IEngine {
 public:
     EngineBase() = default;
-    explicit EngineBase(EngineArguments arguments)
+    explicit EngineBase(EngineArguments arguments, ProcessRunner runner = { })
         : m_arguments(std::move(arguments))
+        , m_runner(std::move(runner))
     {
     }
 
@@ -60,6 +62,7 @@ protected:
 
 private:
     EngineArguments m_arguments;
+    ProcessRunner m_runner;
 };
 
 } // namespace maketex

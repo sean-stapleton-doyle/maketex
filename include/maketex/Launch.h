@@ -1,6 +1,7 @@
 #pragma once
 
 #include "maketex/Process.h"
+#include "maketex/ProcessRunner.h"
 #include "maketex/RunResult.h"
 
 #include <cerrno>
@@ -20,7 +21,8 @@ namespace maketex {
 // A program that is not installed yields notFound (exit code 127, as a
 // shell reports it) instead of an exception, so it surfaces as a diagnostic.
 template <typename Inv>
-RunResult<Inv> launchProcess(const std::vector<std::string>& args,
+RunResult<Inv> launchProcess(const ProcessRunner& runner,
+    const std::vector<std::string>& args,
     const std::filesystem::path& workDir,
     InvokerKind kind,
     Inv invocation,
@@ -33,7 +35,13 @@ RunResult<Inv> launchProcess(const std::vector<std::string>& args,
         .program = args.empty() ? std::string { } : args.front(),
     };
     try {
-        auto pr = Process(args, workDir, extraEnv).wait(limits);
+        ProcessLaunchSpec spec {
+            .argv = args,
+            .workingDir = workDir,
+            .extraEnv = { extraEnv.begin(), extraEnv.end() },
+            .limits = limits,
+        };
+        auto pr = runner ? runner(spec) : runSystemProcess(spec);
         result.exitCode = pr.exitCode;
         result.stdoutOutput = std::move(pr.stdoutOutput);
         result.stderrOutput = std::move(pr.stderrOutput);
@@ -50,6 +58,18 @@ RunResult<Inv> launchProcess(const std::vector<std::string>& args,
         result.notFound = true;
     }
     return result;
+}
+
+template <typename Inv>
+RunResult<Inv> launchProcess(const std::vector<std::string>& args,
+    const std::filesystem::path& workDir,
+    InvokerKind kind,
+    Inv invocation,
+    std::span<const std::pair<std::string, std::string>> extraEnv = { },
+    const WaitLimits& limits = { })
+{
+    return launchProcess(ProcessRunner { }, args, workDir, kind,
+        std::move(invocation), extraEnv, limits);
 }
 
 } // namespace maketex
