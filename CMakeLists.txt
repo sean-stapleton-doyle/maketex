@@ -179,6 +179,18 @@ add_library(maketex STATIC
     src/driver/ToolWaves.cpp
     src/BuildDriver.cpp
     src/engines/EngineFactory.cpp
+    src/build/Environment.cpp
+    src/build/JobName.cpp
+    src/build/TexSystemRoots.cpp
+    src/build/Fingerprint.cpp
+    src/build/BuildHeuristics.cpp
+    src/build/PreambleHooks.cpp
+    src/build/PreambleFormat.cpp
+    src/build/Publish.cpp
+    src/build/BuildFileSets.cpp
+    src/build/OutputDir.cpp
+    src/build/EngineMemory.cpp
+    src/build/BuildLock.cpp
     src/Build.cpp
 )
 add_library(maketex::maketex ALIAS maketex)
