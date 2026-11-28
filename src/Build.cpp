@@ -6,6 +6,7 @@
 #include "maketex/ITool.h"
 #include "maketex/StateDatabase.h"
 #include "maketex/ToolFactory.h"
+#include "maketex/build/BuildAttempts.h"
 #include "maketex/build/BuildHeuristics.h"
 #include "maketex/build/BuildLock.h"
 #include "maketex/build/EngineMemory.h"
@@ -22,7 +23,6 @@
 #include <SQLiteCpp/SQLiteCpp.h>
 
 #include <filesystem>
-#include <format>
 #include <memory>
 #include <string>
 #include <string_view>
@@ -45,6 +45,16 @@ std::string_view version()
 
 namespace {
 
+    fs::path prepareOutputDir(const BuildOptions& options)
+    {
+        fs::path outDir = options.resolvedOutputDir();
+        fs::create_directories(outDir);
+        if (options.usesDefaultOutputDir())
+            build::ignoreInVersionControl(outDir);
+        build::mirrorSourceDirectories(options.texFile.parent_path(), outDir);
+        return outDir;
+    }
+
     std::vector<std::unique_ptr<ITool>> createTools(const BuildOptions& options)
     {
         std::vector<std::unique_ptr<ITool>> tools;
@@ -54,6 +64,42 @@ namespace {
         for (const auto& recipe : options.customTools)
             tools.push_back(std::make_unique<HashTriggeredTool>(recipe));
         return tools;
+    }
+
+    EngineInvocation makeEngineInvocation(const BuildOptions& options,
+        const fs::path& outDir,
+        const std::optional<std::string>& flagJobName,
+        std::vector<std::pair<std::string, std::string>> extraEnv)
+    {
+        return EngineInvocation {
+            .texFile = options.texFile,
+            .outputDir = outDir,
+            .jobName = options.jobName ? options.jobName : flagJobName,
+            .haltOnError = options.haltOnError,
+            .shellEscape = options.shellEscape,
+            .synctex = options.synctex,
+            .extraEnv = std::move(extraEnv),
+        };
+    }
+
+    void maybeAttachPreambleFormat(const BuildOptions& options,
+        EngineKind engineKind,
+        const EngineArguments& engineArguments,
+        const fs::path& outDir,
+        const std::vector<std::pair<std::string, std::string>>& extraEnv,
+        StateDatabase& stateDb,
+        Blake3Hasher& hasher,
+        EngineInvocation& inv)
+    {
+        if (!options.preambleCache || engineKind != EngineKind::PdfLaTeX)
+            return;
+        auto fmt = build::preparePreambleFormat(options, engineArguments, outDir,
+            inv.resolvedJobName(), extraEnv, stateDb, hasher);
+        if (fmt.empty())
+            return;
+        inv.formatName = std::move(fmt);
+        inv.skipPreamble = true;
+        inv.extraEnv.emplace_back("TEXFORMATS", build::prependTexFormats(outDir));
     }
 
     BuildDriver::Config makeDriverConfig(const BuildOptions& options,
@@ -118,30 +164,16 @@ namespace {
     }
 
     BuildResult buildWith(const BuildOptions& options, EngineKind engineKind,
-        bool suppressResetNotice = false)
+        bool suppressResetNotice)
     {
         auto [engineArguments, flagJobName] = build::splitJobName(options.engineArguments);
-        auto jobName = options.jobName ? options.jobName : flagJobName;
         auto engine = createEngine(engineKind, engineArguments);
-
-        fs::path outDir = options.resolvedOutputDir();
-        fs::create_directories(outDir);
-        if (options.usesDefaultOutputDir())
-            build::ignoreInVersionControl(outDir);
-        build::mirrorSourceDirectories(options.texFile.parent_path(), outDir);
+        fs::path outDir = prepareOutputDir(options);
 
         Blake3Hasher hasher;
         auto tools = createTools(options);
         auto extraEnv = build::searchPathEnv(options);
-        EngineInvocation inv {
-            .texFile = options.texFile,
-            .outputDir = outDir,
-            .jobName = jobName,
-            .haltOnError = options.haltOnError,
-            .shellEscape = options.shellEscape,
-            .synctex = options.synctex,
-            .extraEnv = extraEnv,
-        };
+        auto inv = makeEngineInvocation(options, outDir, flagJobName, extraEnv);
 
         // Held until the build returns: a second maketex building this
         // document (watch plus a manual run) waits instead of interleaving
@@ -167,15 +199,8 @@ namespace {
                 .jobName = inv.resolvedJobName(),
             });
 
-        if (options.preambleCache && engineKind == EngineKind::PdfLaTeX) {
-            if (auto fmt = build::preparePreambleFormat(options, engineArguments, outDir,
-                    inv.resolvedJobName(), extraEnv, stateDb, hasher);
-                !fmt.empty()) {
-                inv.formatName = std::move(fmt);
-                inv.skipPreamble = true;
-                inv.extraEnv.emplace_back("TEXFORMATS", build::prependTexFormats(outDir));
-            }
-        }
+        maybeAttachPreambleFormat(
+            options, engineKind, engineArguments, outDir, extraEnv, stateDb, hasher, inv);
 
         auto driverConfig = makeDriverConfig(
             options, engineKind, engineArguments, outDir, inv, std::move(toolPtrs));
@@ -187,6 +212,37 @@ namespace {
         finalizeBuildResult(result, options, outDir, inv, stateDb, suppressResetNotice);
         return result;
     }
+
+    class SystemBuildAttempts final : public build::IBuildAttempts {
+    public:
+        EngineChoice chooseEngine(const BuildOptions& options) override
+        {
+            return maketex::chooseEngine(options);
+        }
+
+        BuildResult attempt(const BuildOptions& options,
+            EngineKind engine,
+            bool suppressResetNotice) override
+        {
+            return buildWith(options, engine, suppressResetNotice);
+        }
+
+        std::optional<EngineKind> rememberedEngine(const BuildOptions& options) override
+        {
+            return build::loadDetectedEngine(options);
+        }
+
+        void rememberEngine(const BuildOptions& options, EngineKind engine) override
+        {
+            build::saveDetectedEngine(options, engine);
+        }
+
+        void discardPartialAux(const BuildOptions& options) override
+        {
+            std::error_code ec;
+            fs::remove(options.resolvedOutputDir() / (jobNameFor(options) + ".aux"), ec);
+        }
+    };
 
 } // namespace
 
@@ -216,48 +272,8 @@ EngineChoice chooseEngine(const BuildOptions& options)
 
 BuildResult runBuild(const BuildOptions& options)
 {
-    auto choice = chooseEngine(options);
-    // If no engine was configured or statically detected, reuse a Unicode
-    // engine discovered by a previous retry so subsequent builds stay
-    // incremental instead of failing pdflatex and resetting the database.
-    if (!options.engine && choice.kind == EngineKind::PdfLaTeX && choice.reason.empty()) {
-        if (auto remembered = build::loadDetectedEngine(options)) {
-            choice.kind = *remembered;
-            choice.reason = "remembered from previous build";
-        }
-    }
-
-    auto result = buildWith(options, choice.kind);
-    result.engineReason = choice.reason;
-
-    // The preamble scan cannot see packages a custom class or style loads.
-    // When the guess was plain pdflatex and the engine said why that was
-    // wrong, retry once with the engine it asked for.
-    bool guessed = !options.engine && choice.kind == EngineKind::PdfLaTeX;
-    if (!result.success && guessed) {
-        if (auto needed = build::unicodeEngineNeeded(result.diagnostics)) {
-            // Drop any partial .aux left by the failed pdflatex pass so it
-            // cannot confuse the Unicode engine.
-            std::error_code ec;
-            fs::remove(options.resolvedOutputDir() / (jobNameFor(options) + ".aux"), ec);
-
-            auto retried = buildWith(options, *needed, /*suppressResetNotice=*/true);
-            retried.engineReason = "pdflatex failed: the document needs a Unicode engine";
-            retried.retriedEngine = true;
-            if (retried.success)
-                build::saveDetectedEngine(options, *needed);
-            retried.diagnostics.insert(retried.diagnostics.begin(),
-                Diagnostic {
-                    .severity = Diagnostic::Severity::Info,
-                    .message = std::format(
-                        "the document needs {0} — rebuilt with it (set `engine = \"{0}\"` "
-                        "in maketex.toml or add `% !TeX program = {0}` to skip the retry)",
-                        engineKindName(*needed)),
-                });
-            return retried;
-        }
-    }
-    return result;
+    SystemBuildAttempts attempts;
+    return build::runBuild(options, attempts);
 }
 
 } // namespace maketex
