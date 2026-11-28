@@ -2,9 +2,11 @@
 
 #include "maketex/BuildEvent.h"
 #include "maketex/Diagnostic.h"
+#include "maketex/DiagnosticPolicy.h"
 #include "maketex/EngineInvocation.h"
 #include "maketex/IEngine.h"
 #include "maketex/ITool.h"
+#include "maketex/ProcessRunner.h"
 #include "maketex/RunResult.h"
 #include "maketex/StateDatabase.h"
 #include "maketex/ToolContext.h"
@@ -39,17 +41,6 @@ struct DriverResult {
     std::vector<std::string> rerunReasons;
     std::string lastError; // set on failure
     std::vector<Diagnostic> diagnostics; // extracted from engine/tool output
-};
-
-// Controls how warnings affect the build outcome and which non-error
-// diagnostic categories are muted.
-struct DiagnosticPolicy {
-    bool warningsAsErrors = false;
-    // Warning categories that fail the build even when warningsAsErrors is off
-    // (e.g. "undefined-citation", "undefined-reference").
-    std::vector<std::string> failOn;
-    // Non-error categories to suppress (e.g. "overfull-hbox", "underfull-hbox").
-    std::vector<std::string> ignore;
 };
 
 // Drives the full multi-pass latex compilation loop.
@@ -105,6 +96,12 @@ public:
         // For XeLaTeX: run every engine pass with -no-pdf (emitting .xdv) and
         // invoke xdvipdfmx once after convergence.
         bool xelatexXdvSplit = false;
+        // Subprocess execution seam for auxiliary tools and xdvipdfmx. When
+        // unset, spawns directly via maketex::Process.
+        ProcessRunner processRunner;
+        // Wall-clock epoch seconds for recorded rule timestamps. Defaults to
+        // std::time(nullptr) when unset.
+        std::function<std::int64_t()> clock;
     };
 
     // engine, db, and hasher are non-owning — caller must ensure they
@@ -218,6 +215,7 @@ private:
 
     // Forwards event to m_observer when one is set.
     void notify(const BuildEvent& event) const;
+    std::int64_t nowEpoch() const;
 
     IEngine& m_engine;
     StateDatabase& m_db;
@@ -233,6 +231,8 @@ private:
     std::function<std::string()> m_preambleProvider;
     bool m_draftFirstPass = false;
     bool m_xelatexXdvSplit = false;
+    ProcessRunner m_processRunner;
+    std::function<std::int64_t()> m_clock;
 
     BuildGraph m_graph;
 };
