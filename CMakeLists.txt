@@ -191,6 +191,7 @@ add_library(maketex STATIC
     src/build/OutputDir.cpp
     src/build/EngineMemory.cpp
     src/build/BuildLock.cpp
+    src/build/BuildAttempts.cpp
     src/Build.cpp
 )
 add_library(maketex::maketex ALIAS maketex)
