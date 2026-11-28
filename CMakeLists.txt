@@ -306,17 +306,3 @@ if(MAKETEX_BUILD_TESTS)
         )
     endif()
 endif()
-
-# Compiler launchers (ccache) can rewrite object paths or serve stale .gcno
-# metadata under --coverage, causing .gcda files to be missed at runtime.
-# Disable them on coverage-instrumented targets while keeping dependencies cached.
-if(MAKETEX_COVERAGE)
-    foreach(_cov_target IN ITEMS maketex maketex_cli_core maketex_app
-            maketex_tests maketex_integration_tests maketex_e2e_tests)
-        if(TARGET ${_cov_target})
-            set_target_properties(${_cov_target} PROPERTIES
-                C_COMPILER_LAUNCHER ""
-                CXX_COMPILER_LAUNCHER "")
-        endif()
-    endforeach()
-endif()

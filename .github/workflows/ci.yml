@@ -17,6 +17,10 @@ on:
       - 'demo/**'
       - 'examples/**'
 
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
+
 jobs:
   # Unit tests plus the integration suite against a full TeX Live, so every
   # testdata/ fixture runs (a local BasicTeX skips several of them).
@@ -49,8 +53,12 @@ jobs:
       # Ubuntu 24.04's CMake (3.28) can't request C++26 from GCC 14 and
       # would silently build as C++17; CMakeLists.txt refuses it.
       # Ubuntu 24.04's gcovr (7.0) predates GCC 14's gcov format.
+      # Explicitly pin PIPX_HOME/PIPX_BIN_DIR to ~/.local so actions/cache
+      # caches them (the runner defaults PIPX_HOME to /opt/pipx).
       - name: Install CMake and gcovr
         run: |
+          export PIPX_HOME="$HOME/.local/share/pipx"
+          export PIPX_BIN_DIR="$HOME/.local/bin"
           if [ ! -x "$HOME/.local/bin/cmake" ]; then
             pipx install cmake
           fi
@@ -71,9 +79,9 @@ jobs:
         uses: actions/cache@v6
         with:
           path: ~/.cache/ccache
-          key: ccache-ci-${{ runner.os }}-${{ runner.arch }}-debug-cov-${{ github.sha }}
+          key: ccache-ci-${{ runner.os }}-${{ runner.arch }}-debug-cov-v2-${{ github.sha }}
           restore-keys: |
-            ccache-ci-${{ runner.os }}-${{ runner.arch }}-debug-cov-
+            ccache-ci-${{ runner.os }}-${{ runner.arch }}-debug-cov-v2-
 
       # Set both C and C++ to GCC 14: leaving C on Ubuntu's default gcc-13 makes
       # CMake inject -L/usr/lib/gcc/x86_64-linux-gnu/13 ahead of GCC 14's libdir,
@@ -93,7 +101,7 @@ jobs:
       - name: Build
         run: |
           export CCACHE_DIR="$HOME/.cache/ccache"
-          export CCACHE_MAXSIZE=500M
+          export CCACHE_MAXSIZE=1G
           export CCACHE_COMPRESS=true
           ccache -z
           cmake --build build
@@ -130,6 +138,15 @@ jobs:
         env:
           HAS_TOKEN: ${{ secrets.SONAR_TOKEN != '' }}
         run: echo "enabled=${HAS_TOKEN}" >> "$GITHUB_OUTPUT"
+
+      - name: Cache SonarQube scanner plugins
+        if: steps.sonar_check.outputs.enabled == 'true'
+        uses: actions/cache@v6
+        with:
+          path: ~/.sonar/cache
+          key: sonar-cache-${{ runner.os }}-${{ runner.arch }}-v1
+          restore-keys: |
+            sonar-cache-${{ runner.os }}-${{ runner.arch }}-
 
       - name: SonarQube Cloud Scan
         if: steps.sonar_check.outputs.enabled == 'true'
@@ -202,6 +219,8 @@ jobs:
       # Pinned to the major used locally; formatting differs across majors.
       - name: Install clang-format
         run: |
+          export PIPX_HOME="$HOME/.local/share/pipx"
+          export PIPX_BIN_DIR="$HOME/.local/bin"
           if [ ! -x "$HOME/.local/bin/clang-format" ]; then
             pipx install 'clang-format>=22,<23'
           fi

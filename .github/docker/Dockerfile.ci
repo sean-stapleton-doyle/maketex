@@ -1,0 +1,18 @@
+FROM ubuntu:24.04
+
+ENV DEBIAN_FRONTEND=noninteractive
+ENV PIPX_HOME=/opt/pipx
+ENV PIPX_BIN_DIR=/usr/local/bin
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        ca-certificates curl git gnupg tar unzip xz-utils zstd \
+        gcc-14 g++-14 ninja-build ccache pipx \
+        texlive-latex-base texlive-latex-recommended texlive-latex-extra \
+        texlive-bibtex-extra biber texlive-xetex texlive-luatex \
+        texlive-pictures texlive-science texlive-extra-utils \
+        texlive-fonts-recommended lmodern fonts-lmodern \
+        python3-pygments python-is-python3 ghostscript texlive-font-utils \
+    && pipx install cmake \
+    && pipx install gcovr \
+    && useradd -m -u 1001 -s /bin/bash runner \
+    && rm -rf /var/lib/apt/lists/* /root/.cache
