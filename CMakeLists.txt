@@ -173,7 +173,9 @@ add_library(maketex STATIC
     src/graph/FileNode.cpp
     src/graph/RuleNode.cpp
     src/graph/BuildGraph.cpp
+    src/driver/FileDigests.cpp
     src/driver/PassAnalysis.cpp
+    src/driver/ToolPass.cpp
     src/driver/ToolWaves.cpp
     src/BuildDriver.cpp
     src/engines/EngineFactory.cpp

@@ -30,6 +30,12 @@ namespace maketex {
 class FileStateTracker;
 class IFileHasher;
 
+namespace driver {
+    class FileDigests;
+    class ToolPass;
+    struct ToolPassOutcome;
+} // namespace driver
+
 // Result of a complete BuildDriver run.
 struct DriverResult {
     bool success = false;
@@ -124,36 +130,26 @@ public:
     DriverResult run();
 
 private:
-    // Outcome of running the stale tools once.
-    struct ToolPassOutcome {
-        bool ranAny = false;
-        // A tool rewrote a file the engine reads back (or has unknown
-        // outputs), so the engine must run again.
-        bool outputsChanged = false;
-        // What changed, for rerun reasons: "biber rewrote main.bbl".
-        std::vector<std::string> changes;
-        std::optional<RunResult<ToolInvocation>> failure;
-        std::string failedToolName;
-        std::optional<std::error_code> snapshotError;
-        // Warnings from the tools that ran successfully (e.g. bibtex's
-        // "I didn't find a database entry").
-        std::vector<Diagnostic> diagnostics;
-    };
+    enum class PassStep { Rerun,
+        Done };
 
-    // Content digests keyed by weakly-canonical path string.
-    using Digests = std::map<std::string, Hash>;
+    struct ConvergenceState {
+        DriverResult result;
+        std::vector<Diagnostic> toolWarnings;
+    };
 
     // Rule identity must include the job name: the state database lives
     // per-directory, and two documents built in the same directory must not
     // share rule records (they would clobber each other's input snapshots).
     std::string engineRuleName() const;
-    std::string toolRuleName(const ITool& tool) const;
 
     // Context handed to ITool's hooks, with lazy log/aux/fls parsing bound
     // to this invocation's output files.
     ToolContext makeToolContext() const;
 
     FlsParser makeFlsParser() const;
+    FileStateTracker makeTracker() const;
+    driver::ToolPass makeToolPass(driver::FileDigests& digests) const;
 
     // Writes every refreshed FileNode's state to the database so the next
     // invocation's (mtime, size) fast path avoids rehashing unchanged files.
@@ -162,36 +158,46 @@ private:
     // Parse .fls and wire up FileNode/RuleNode edges in m_graph.
     void updateGraphFromFls(const std::filesystem::path& flsPath);
 
-    // Hashes every engine-written file except final products (PDF, log, …)
-    // — the files a following pass may read back. Propagates the first
-    // snapshot error (E.7) instead of silently guessing.
-    std::expected<Digests, std::error_code> takeSnapshot(FileStateTracker& tracker);
-
     // True when a prior .fls exists, the engine rule last succeeded with
     // exactly the current inputs, and its products are still on disk. Any
     // snapshot error answers false (conservative: a real pass re-surfaces
     // the error if it persists).
     bool engineUpToDate(FileStateTracker& tracker);
 
-    // Digest of each tool input: file contents via the tracker, derived
-    // inputs via the hasher. Missing files are omitted.
-    std::expected<Digests, std::error_code> digestInputs(
-        const std::vector<ToolInput>& inputs, FileStateTracker& tracker);
+    // Handles the fast path where engine inputs are up to date: runs any stale
+    // auxiliary tools, returning a final DriverResult unless a tool rewrote an
+    // engine input (in which case nullopt signals that engine passes must run).
+    std::optional<DriverResult> finishWithoutEnginePass(driver::FileDigests& digests);
 
-    // Current hash of path, or nullopt when it does not exist.
-    std::expected<std::optional<Hash>, std::error_code> currentHash(
-        const std::filesystem::path& path, FileStateTracker& tracker);
+    // Populates m_inv.preamble lazily from m_preambleProvider when unset.
+    void ensurePreamble();
 
-    // Whether tool must run given its current input digests: no successful
-    // run on record, different inputs than that run consumed, or one of the
-    // outputs it produced since deleted or modified.
-    std::expected<bool, std::error_code> toolIsStale(const ITool& tool,
-        const Digests& inputs, FileStateTracker& tracker);
+    // Runs one engine pass plus any stale tools, updating state and returning
+    // whether another pass is required.
+    PassStep runPass(int pass,
+        FileStateTracker& tracker,
+        driver::FileDigests& digests,
+        RuleNode& latexRule,
+        const std::string& command,
+        ConvergenceState& state);
 
-    // Runs every tool that applies and is stale, recording each run (inputs
-    // consumed, outputs produced) as it completes. Stops at the first
-    // failure.
-    ToolPassOutcome runStaleTools(const ToolContext& ctx, FileStateTracker& tracker);
+    // Updates the graph from the pass's .fls and refreshes every engine input.
+    std::expected<void, std::string> refreshEngineInputs(
+        RuleNode& latexRule, FileStateTracker& tracker);
+
+    // Under XeLaTeX -no-pdf split, invokes xdvipdfmx once on the converged .xdv.
+    // Returns false (having recorded the failure on state) if xdvipdfmx failed.
+    bool finalizeXdv(RuleNode& latexRule,
+        const std::string& command,
+        ConvergenceState& state);
+
+    // Applies diagnostic policy, records convergence, and persists file states.
+    void finalizeConverged(const RunResult<EngineInvocation>& engineResult,
+        RuleNode& latexRule,
+        const std::string& command,
+        ConvergenceState& state);
+
+    static void recordToolFailure(DriverResult& result, driver::ToolPassOutcome& outcome);
 
     // A file the pass reported missing ("No file main.toc.") that now
     // exists, so the next pass would read it; nullopt when there is none.
