@@ -154,6 +154,13 @@ add_library(maketex STATIC
     src/tools/HashTriggeredTool.cpp
     src/tools/MakeglossariesTool.cpp
     src/DiagnosticExtractor.cpp
+    src/diagnostics/SourceResolver.cpp
+    src/diagnostics/LogLines.cpp
+    src/diagnostics/Categorize.cpp
+    src/diagnostics/FileStack.cpp
+    src/diagnostics/LatexErrors.cpp
+    src/diagnostics/LatexWarnings.cpp
+    src/diagnostics/ToolOutput.cpp
     src/DiagnosticFormatter.cpp
     src/DiagnosticPolicy.cpp
     src/DocumentProbe.cpp
